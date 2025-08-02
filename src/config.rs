@@ -18,7 +18,7 @@ struct Args {
     port: u16,
 
     /// The friendly name for the DLNA server
-    #[arg(short, long, default_value = "Rust DLNA Server")]
+    #[arg(short, long, default_value = "DLNA")]
     name: String,
 }
 

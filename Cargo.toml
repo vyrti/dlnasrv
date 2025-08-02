@@ -1,5 +1,5 @@
 [package]
-name = "rust-dlna-server"
+name = "dlnasrv"
 version = "0.1.0"
 edition = "2021"
 

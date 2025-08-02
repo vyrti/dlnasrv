@@ -65,57 +65,6 @@ pub async fn content_directory_control(
     }
 }
 
-fn parse_range_header(range_str: &str, file_size: u64) -> Result<(u64, u64), AppError> {
-    // Parse range header like "bytes=0-1023" or "bytes=0-" or "bytes=-1024"
-    if !range_str.starts_with("bytes=") {
-        return Err(AppError::InvalidRange);
-    }
-    
-    let range_part = &range_str[6..]; // Remove "bytes="
-    let parts: Vec<&str> = range_part.split('-').collect();
-    
-    if parts.len() != 2 {
-        return Err(AppError::InvalidRange);
-    }
-    
-    let start_str = parts[0];
-    let end_str = parts[1];
-    
-    let (start, end) = if start_str.is_empty() {
-        // Suffix range: bytes=-1024 (last 1024 bytes)
-        if let Ok(suffix_length) = end_str.parse::<u64>() {
-            let start = file_size.saturating_sub(suffix_length);
-            (start, file_size - 1)
-        } else {
-            return Err(AppError::InvalidRange);
-        }
-    } else if end_str.is_empty() {
-        // Range from start to end: bytes=1024-
-        if let Ok(start) = start_str.parse::<u64>() {
-            if start >= file_size {
-                return Err(AppError::InvalidRange);
-            }
-            (start, file_size - 1)
-        } else {
-            return Err(AppError::InvalidRange);
-        }
-    } else {
-        // Full range: bytes=0-1023
-        let start = start_str.parse::<u64>().map_err(|_| AppError::InvalidRange)?;
-        let end = end_str.parse::<u64>().map_err(|_| AppError::InvalidRange)?;
-        
-        if start > end || start >= file_size {
-            return Err(AppError::InvalidRange);
-        }
-        
-        // Clamp end to file size
-        let end = std::cmp::min(end, file_size - 1);
-        (start, end)
-    };
-    
-    Ok((start, end))
-}
-
 pub async fn serve_media(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -136,10 +85,10 @@ pub async fn serve_media(
         .header(header::ACCEPT_RANGES, "bytes");
 
     let (start, end) = if let Some(range_header) = headers.get(header::RANGE) {
-        // Handle range requests for streaming
         let range_str = range_header.to_str().map_err(|_| AppError::InvalidRange)?;
         debug!("Received range request: {}", range_str);
         
+        // Parse the range header manually to avoid enum variant issues
         parse_range_header(range_str, file_size)?
     } else {
         // No range requested, serve the whole file
@@ -165,4 +114,45 @@ pub async fn serve_media(
     let body = Body::from_stream(stream);
 
     Ok(response_builder.status(response_status).body(body)?)
+}
+
+// Helper function to parse range header manually
+fn parse_range_header(range_str: &str, file_size: u64) -> Result<(u64, u64), AppError> {
+    // Remove "bytes=" prefix
+    let range_part = range_str.strip_prefix("bytes=").ok_or(AppError::InvalidRange)?;
+    
+    // Split on comma to get individual ranges (we'll just handle the first one)
+    let first_range = range_part.split(',').next().ok_or(AppError::InvalidRange)?;
+    
+    // Parse the range
+    if let Some((start_str, end_str)) = first_range.split_once('-') {
+        let start = if start_str.is_empty() {
+            // Suffix range like "-500" (last 500 bytes)
+            let suffix_len: u64 = end_str.parse().map_err(|_| AppError::InvalidRange)?;
+            if suffix_len >= file_size {
+                0
+            } else {
+                file_size - suffix_len
+            }
+        } else {
+            start_str.parse().map_err(|_| AppError::InvalidRange)?
+        };
+        
+        let end = if end_str.is_empty() {
+            // Range like "500-" (from 500 to end)
+            file_size - 1
+        } else {
+            let parsed_end: u64 = end_str.parse().map_err(|_| AppError::InvalidRange)?;
+            parsed_end.min(file_size - 1)
+        };
+        
+        // Validate range
+        if start > end || start >= file_size {
+            return Err(AppError::InvalidRange);
+        }
+        
+        Ok((start, end))
+    } else {
+        Err(AppError::InvalidRange)
+    }
 }

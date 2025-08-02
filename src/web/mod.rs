@@ -17,6 +17,6 @@ pub fn create_router(state: AppState) -> Router {
             get(handlers::content_directory_control).post(handlers::content_directory_control),
         )
         // Corrected route syntax from "/media/:id" to "/media/{id}"
-        .route("/media/:id", get(handlers::serve_media))
+        .route("/media/{id}", get(handlers::serve_media))
         .with_state(state)
 }

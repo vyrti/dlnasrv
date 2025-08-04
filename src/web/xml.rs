@@ -17,8 +17,8 @@ pub fn generate_description_xml(config: &Config) -> String {
     <device>
         <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
         <friendlyName>{}</friendlyName>
-        <manufacturer>Rust DLNA</manufacturer>
-        <modelName>Rust DLNA Server</modelName>
+        <manufacturer>OpenDLNA</manufacturer>
+        <modelName>OpenDLNA Server</modelName>
         <UDN>uuid:{}</UDN>
         <serviceList>
             <service>

@@ -68,7 +68,7 @@ async fn send_ssdp_alive(config: &Config) -> Result<()> {
         LOCATION: http://{}:{}/description.xml\r\n\
         NT: urn:schemas-upnp-org:device:MediaServer:1\r\n\
         NTS: ssdp:alive\r\n\
-        SERVER: Rust DLNA/1.0 UPnP/1.0\r\n\
+        SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
         USN: uuid:{}::urn:schemas-upnp-org:device:MediaServer:1\r\n\r\n",
         config.host, config.port, config.uuid
     );
@@ -83,7 +83,7 @@ fn create_ssdp_response(config: &Config) -> String {
         CACHE-CONTROL: max-age=1800\r\n\
         EXT:\r\n\
         LOCATION: http://{}:{}/description.xml\r\n\
-        SERVER: Rust DLNA/1.0 UPnP/1.0\r\n\
+        SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
         ST: urn:schemas-upnp-org:device:MediaServer:1\r\n\
         USN: uuid:{}::urn:schemas-upnp-org:device:MediaServer:1\r\n\r\n",
         config.host, config.port, config.uuid

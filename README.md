@@ -18,32 +18,16 @@ cargo build --release
 ```
 
 ### Run
-```sh
-./target/release/opendlna --media-dir /path/to/media --port 8080 --name "My DLNA Server"
-```
+Usage: opendlna [OPTIONS] [MEDIA_DIR]
 
-- `--media-dir`: Directory containing your video files (default: current directory)
-- `--port`: Port to listen on (default: 8080)
-- `--name`: Friendly name for the server (default: "OpenDLNA")
+Arguments:
+  [MEDIA_DIR]  The directory containing media files to serve [default: /Users/alex/Documents/code/rust/dlnarust]
 
-### Access
-- The server will be discoverable by DLNA/UPnP clients on your local network.
-- Web interface: `http://<your-ip>:<port>/`
-
-## Dependencies
-- rust
-- axum
-- tokio
-- serde
-- uuid
-- tokio-util
-- thiserror
-- anyhow
-- clap
-- tracing
-- tracing-subscriber
-- headers
-- xml-rs
+Options:
+  -p, --port <PORT>  The network port to listen on [default: 8080]
+  -n, --name <NAME>  The friendly name for the DLNA server [default: "Rust DLNA Server"]
+  -h, --help         Print help
+  -V, --version      Print version
 
 ## License
 

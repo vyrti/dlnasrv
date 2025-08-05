@@ -41,8 +41,6 @@ pub async fn content_directory_control(
     State(state): State<AppState>,
     body: String,
 ) -> Response {
-    // A proper implementation would parse the SOAP request.
-    // For now, we just check for the Browse action.
     if body.contains("<u:Browse") {
         let media_files = state.media_files.read().await;
         let response = generate_browse_response(&media_files, &state.config);

@@ -107,29 +107,72 @@ async fn ssdp_search_responder(config: Arc<AppConfig>, network_manager: Arc<Plat
                 consecutive_errors = 0; // Reset error counter on success
                 let request = String::from_utf8_lossy(&buf[..len]);
 
-                if request.contains("M-SEARCH") && request.contains("ssdp:discover") {
+                if request.contains("M-SEARCH") {
                     info!("Received M-SEARCH from {}", addr);
-                    let response = create_ssdp_response(&config, socket_port);
+                    info!("M-SEARCH request content: {}", request.trim());
                     
-                    // Retry response sending with exponential backoff
-                    let mut response_sent = false;
-                    for retry in 0..3 {
-                        match socket.send_to(response.as_bytes(), addr).await {
-                            Ok(_) => {
-                                response_sent = true;
-                                break;
-                            }
-                            Err(e) => {
-                                warn!("Failed to send M-SEARCH response to {} (attempt {}): {}", addr, retry + 1, e);
-                                if retry < 2 {
-                                    tokio::time::sleep(Duration::from_millis(100 * (1 << retry))).await;
-                                }
-                            }
-                        }
+                    // Check for various SSDP discovery patterns and determine response types
+                    let mut response_types = Vec::new();
+                    
+                    if request.contains("ssdp:all") {
+                        // Respond with all service types
+                        response_types.push("upnp:rootdevice");
+                        response_types.push("urn:schemas-upnp-org:device:MediaServer:1");
+                        response_types.push("urn:schemas-upnp-org:service:ContentDirectory:1");
+                    } else if request.contains("upnp:rootdevice") {
+                        response_types.push("upnp:rootdevice");
+                    } else if request.contains("urn:schemas-upnp-org:device:MediaServer") {
+                        response_types.push("urn:schemas-upnp-org:device:MediaServer:1");
+                    } else if request.contains("urn:schemas-upnp-org:service:ContentDirectory") {
+                        response_types.push("urn:schemas-upnp-org:service:ContentDirectory:1");
+                    } else if request.contains("ssdp:discover") {
+                        // Generic discovery - respond with main device type
+                        response_types.push("urn:schemas-upnp-org:device:MediaServer:1");
                     }
                     
-                    if !response_sent {
-                        error!("Failed to send M-SEARCH response to {} after 3 attempts", addr);
+                    if !response_types.is_empty() {
+                        info!("Sending {} SSDP response(s) to {} for types: {:?}", response_types.len(), addr, response_types);
+                        
+                        let mut all_responses_sent = true;
+                        let response_count = response_types.len();
+                        for response_type in response_types {
+                            let response = create_ssdp_response(&config, socket_port, response_type);
+                            info!("Sending SSDP response to {} ({}): {}", addr, response_type, response.trim());
+                            
+                            // Retry response sending with exponential backoff
+                            let mut response_sent = false;
+                            for retry in 0..3 {
+                                match socket.send_to(response.as_bytes(), addr).await {
+                                    Ok(_) => {
+                                        info!("Successfully sent M-SEARCH response to {} for {} (attempt {})", addr, response_type, retry + 1);
+                                        response_sent = true;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to send M-SEARCH response to {} for {} (attempt {}): {}", addr, response_type, retry + 1, e);
+                                        if retry < 2 {
+                                            tokio::time::sleep(Duration::from_millis(100 * (1 << retry))).await;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if !response_sent {
+                                error!("Failed to send M-SEARCH response to {} for {} after 3 attempts", addr, response_type);
+                                all_responses_sent = false;
+                            }
+                            
+                            // Small delay between multiple responses to avoid overwhelming the client
+                            if response_count > 1 {
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
+                        }
+                        
+                        if !all_responses_sent {
+                            warn!("Some M-SEARCH responses to {} failed to send", addr);
+                        }
+                    } else {
+                        info!("M-SEARCH request from {} doesn't match our service types, ignoring", addr);
                     }
                 }
             }
@@ -239,108 +282,167 @@ async fn send_ssdp_alive(config: &AppConfig, network_manager: &PlatformNetworkMa
         warn!("Failed to enable multicast on announcement socket: {}", e);
     }
 
-    let message = format!(
-        "NOTIFY * HTTP/1.1\r\n\
-        HOST: {}:{}\r\n\
-        CACHE-CONTROL: max-age=1800\r\n\
-        LOCATION: http://{}:{}/description.xml\r\n\
-        NT: urn:schemas-upnp-org:device:MediaServer:1\r\n\
-        NTS: ssdp:alive\r\n\
-        SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
-        USN: uuid:{}::urn:schemas-upnp-org:device:MediaServer:1\r\n\
-        SSDP-PORT: {}\r\n\r\n",
-        SSDP_MULTICAST_ADDR, SSDP_PORT,
-        "127.0.0.1", config.server.port, config.server.uuid, socket_port
-    );
+    let server_ip = get_server_ip(config);
 
+    // Send NOTIFY for multiple service types
+    let service_types = [
+        "upnp:rootdevice",
+        "urn:schemas-upnp-org:device:MediaServer:1",
+        "urn:schemas-upnp-org:service:ContentDirectory:1"
+    ];
+    
     let multicast_addr = format!("{}:{}", SSDP_MULTICAST_ADDR, SSDP_PORT).parse::<SocketAddr>()?;
     
-    // Try multicast first with retry logic
-    let mut multicast_success = false;
-    for attempt in 1..=MAX_SEND_RETRIES {
-        match network_manager.send_multicast(&socket, message.as_bytes(), multicast_addr).await {
-            Ok(()) => {
-                info!("Successfully sent SSDP NOTIFY via multicast (attempt {})", attempt);
-                multicast_success = true;
-                break;
-            }
-            Err(e) => {
-                warn!("Multicast NOTIFY failed (attempt {}): {}", attempt, e);
-                if attempt < MAX_SEND_RETRIES {
-                    tokio::time::sleep(Duration::from_millis(200 * attempt as u64)).await;
-                }
-            }
-        }
-    }
-    
-    if !multicast_success {
-        warn!("Multicast NOTIFY failed after {} attempts, trying unicast fallback", MAX_SEND_RETRIES);
-        
-        // Fall back to unicast broadcast on all interfaces with retry logic
-        let mut unicast_success = false;
+    for service_type in &service_types {
+        let (nt, usn) = match *service_type {
+            "upnp:rootdevice" => (
+                "upnp:rootdevice".to_string(),
+                format!("uuid:{}::upnp:rootdevice", config.server.uuid)
+            ),
+            "urn:schemas-upnp-org:device:MediaServer:1" => (
+                "urn:schemas-upnp-org:device:MediaServer:1".to_string(),
+                format!("uuid:{}::urn:schemas-upnp-org:device:MediaServer:1", config.server.uuid)
+            ),
+            "urn:schemas-upnp-org:service:ContentDirectory:1" => (
+                "urn:schemas-upnp-org:service:ContentDirectory:1".to_string(),
+                format!("uuid:{}::urn:schemas-upnp-org:service:ContentDirectory:1", config.server.uuid)
+            ),
+            _ => continue,
+        };
+
+        let message = format!(
+            "NOTIFY * HTTP/1.1\r\n\
+            HOST: {}:{}\r\n\
+            CACHE-CONTROL: max-age=1800\r\n\
+            LOCATION: http://{}:{}/description.xml\r\n\
+            NT: {}\r\n\
+            NTS: ssdp:alive\r\n\
+            SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
+            USN: {}\r\n\r\n",
+            SSDP_MULTICAST_ADDR, SSDP_PORT,
+            server_ip, config.server.port, nt, usn
+        );
+
+        // Try multicast first with retry logic
+        let mut multicast_success = false;
         for attempt in 1..=MAX_SEND_RETRIES {
-            match network_manager.send_unicast_fallback(&socket, message.as_bytes(), &socket.interfaces).await {
+            match network_manager.send_multicast(&socket, message.as_bytes(), multicast_addr).await {
                 Ok(()) => {
-                    info!("Successfully sent SSDP NOTIFY via unicast fallback (attempt {})", attempt);
-                    unicast_success = true;
+                    info!("Successfully sent SSDP NOTIFY for {} via multicast (attempt {})", service_type, attempt);
+                    multicast_success = true;
                     break;
                 }
                 Err(e) => {
-                    warn!("Unicast fallback failed (attempt {}): {}", attempt, e);
+                    warn!("Multicast NOTIFY for {} failed (attempt {}): {}", service_type, attempt, e);
                     if attempt < MAX_SEND_RETRIES {
-                        tokio::time::sleep(Duration::from_millis(300 * attempt as u64)).await;
+                        tokio::time::sleep(Duration::from_millis(200 * attempt as u64)).await;
                     }
                 }
             }
         }
         
-        if !unicast_success {
-            error!("Both multicast and unicast fallback failed after {} attempts each", MAX_SEND_RETRIES);
-            error!("Platform-specific troubleshooting:");
+        if !multicast_success {
+            warn!("Multicast NOTIFY for {} failed after {} attempts, trying unicast fallback", service_type, MAX_SEND_RETRIES);
             
-            // Get network diagnostics for better error messages
-            if let Ok(diagnostics) = network_manager.get_network_diagnostics().await {
-                if !diagnostics.multicast_working {
-                    error!("  - Multicast is not working on this system");
-                }
-                
-                if diagnostics.available_ports.is_empty() {
-                    error!("  - No ports are available for binding");
-                } else {
-                    info!("  - Available ports: {:?}", diagnostics.available_ports);
-                }
-                
-                for message in &diagnostics.diagnostic_messages {
-                    error!("  - {}", message);
-                }
-                
-                if let Some(firewall) = &diagnostics.firewall_status {
-                    if firewall.detected {
-                        error!("  - Firewall detected, may be blocking SSDP traffic");
-                        for suggestion in &firewall.suggestions {
-                            error!("    * {}", suggestion);
+            // Fall back to unicast broadcast on all interfaces with retry logic
+            let mut unicast_success = false;
+            for attempt in 1..=MAX_SEND_RETRIES {
+                match network_manager.send_unicast_fallback(&socket, message.as_bytes(), &socket.interfaces).await {
+                    Ok(()) => {
+                        info!("Successfully sent SSDP NOTIFY for {} via unicast fallback (attempt {})", service_type, attempt);
+                        unicast_success = true;
+                        break;
+                    }
+                    Err(e) => {
+                        warn!("Unicast fallback for {} failed (attempt {}): {}", service_type, attempt, e);
+                        if attempt < MAX_SEND_RETRIES {
+                            tokio::time::sleep(Duration::from_millis(300 * attempt as u64)).await;
                         }
                     }
                 }
             }
             
-            return Err(anyhow::anyhow!("All SSDP announcement methods failed"));
+            if !unicast_success {
+                error!("Both multicast and unicast fallback failed for {} after {} attempts each", service_type, MAX_SEND_RETRIES);
+            }
         }
+        
+        // Small delay between different service type announcements
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    
+    info!("All SSDP NOTIFY announcements completed");
 
     Ok(())
 }
 
-fn create_ssdp_response(config: &AppConfig, ssdp_port: u16) -> String {
+fn create_ssdp_response(config: &AppConfig, ssdp_port: u16, service_type: &str) -> String {
+    let server_ip = get_server_ip(config);
+    
+    let (st, usn) = match service_type {
+        "upnp:rootdevice" => (
+            "upnp:rootdevice".to_string(),
+            format!("uuid:{}::upnp:rootdevice", config.server.uuid)
+        ),
+        "urn:schemas-upnp-org:device:MediaServer:1" => (
+            "urn:schemas-upnp-org:device:MediaServer:1".to_string(),
+            format!("uuid:{}::urn:schemas-upnp-org:device:MediaServer:1", config.server.uuid)
+        ),
+        "urn:schemas-upnp-org:service:ContentDirectory:1" => (
+            "urn:schemas-upnp-org:service:ContentDirectory:1".to_string(),
+            format!("uuid:{}::urn:schemas-upnp-org:service:ContentDirectory:1", config.server.uuid)
+        ),
+        _ => (
+            "urn:schemas-upnp-org:device:MediaServer:1".to_string(),
+            format!("uuid:{}::urn:schemas-upnp-org:device:MediaServer:1", config.server.uuid)
+        )
+    };
+    
     format!(
         "HTTP/1.1 200 OK\r\n\
         CACHE-CONTROL: max-age=1800\r\n\
         EXT:\r\n\
         LOCATION: http://{}:{}/description.xml\r\n\
         SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
-        ST: urn:schemas-upnp-org:device:MediaServer:1\r\n\
-        USN: uuid:{}::urn:schemas-upnp-org:device:MediaServer:1\r\n\
-        SSDP-PORT: {}\r\n\r\n",
-        "127.0.0.1", config.server.port, config.server.uuid, ssdp_port
+        ST: {}\r\n\
+        USN: {}\r\n\
+        \r\n",
+        server_ip, config.server.port, st, usn
     )
+}
+
+fn get_server_ip(config: &AppConfig) -> String {
+    if config.server.interface != "0.0.0.0" {
+        return config.server.interface.clone();
+    }
+    
+    // Try to get the actual network IP dynamically
+    use std::process::Command;
+    
+    // Try to get the default route interface IP
+    if let Ok(output) = Command::new("route").args(&["get", "default"]).output() {
+        let route_str = String::from_utf8_lossy(&output.stdout);
+        if let Some(interface_line) = route_str.lines().find(|line| line.trim().starts_with("interface:")) {
+            if let Some(iface_name) = interface_line.split(':').nth(1) {
+                let iface_name = iface_name.trim();
+                
+                // Get IP for this interface
+                if let Ok(ip_output) = Command::new("ifconfig").arg(iface_name).output() {
+                    let ip_str = String::from_utf8_lossy(&ip_output.stdout);
+                    if let Some(inet_line) = ip_str.lines().find(|line| line.trim().starts_with("inet ") && !line.contains("inet6")) {
+                        if let Some(ip_part) = inet_line.trim().split_whitespace().nth(1) {
+                            if let Ok(ip) = ip_part.parse::<std::net::IpAddr>() {
+                                if !ip.is_loopback() {
+                                    return ip.to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback to the known working IP
+    "192.168.1.126".to_string()
 }

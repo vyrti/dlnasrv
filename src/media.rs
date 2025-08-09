@@ -15,24 +15,15 @@ pub struct MediaScanner {
 
 impl MediaScanner {
     /// Create a new media scanner with platform-specific file system manager
-    pub fn new() -> Self {
+    pub async fn new() -> anyhow::Result<Self> {
         // Create a temporary in-memory database for basic scanning
-        let rt = tokio::runtime::Handle::try_current()
-            .or_else(|_| {
-                tokio::runtime::Runtime::new()
-                    .map(|rt| rt.handle().clone())
-            })
-            .expect("Failed to get async runtime");
+        let temp_path = std::env::temp_dir().join("temp_scanner.db");
+        let database_manager = Arc::new(crate::database::SqliteDatabase::new(temp_path).await?) as Arc<dyn DatabaseManager>;
         
-        let database_manager = rt.block_on(async {
-            let temp_path = std::env::temp_dir().join("temp_scanner.db");
-            Arc::new(crate::database::SqliteDatabase::new(temp_path).await.unwrap()) as Arc<dyn DatabaseManager>
-        });
-        
-        Self {
+        Ok(Self {
             filesystem_manager: create_platform_filesystem_manager(),
             database_manager,
-        }
+        })
     }
     
     /// Create a new media scanner with database manager

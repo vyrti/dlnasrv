@@ -330,7 +330,13 @@ async fn handle_configuration_changes(
                 // Scan new directory
                 let dir_path = std::path::PathBuf::from(new_dir);
                 if dir_path.exists() && dir_path.is_dir() {
-                    let scanner = media::MediaScanner::new();
+                    let scanner = match media::MediaScanner::new().await {
+                        Ok(scanner) => scanner,
+                        Err(e) => {
+                            warn!("Failed to create media scanner for directory {}: {}", new_dir, e);
+                            continue;
+                        }
+                    };
                     match scanner.scan_directory_simple(&dir_path).await {
                         Ok(files) => {
                             info!("Found {} media files in new directory: {}", files.len(), new_dir);
@@ -707,7 +713,8 @@ async fn perform_initial_media_scan(config: &AppConfig, database: &Arc<dyn Datab
             info!("Scanning directory: {}", dir_config.path);
             
             // Use the media scanner to find files
-            let scanner = media::MediaScanner::new();
+            let scanner = media::MediaScanner::new().await
+                .with_context(|| "Failed to create media scanner")?;
             let files = scanner.scan_directory_simple(&dir_path).await
                 .with_context(|| format!("Failed to scan directory: {}", dir_config.path))?;
             

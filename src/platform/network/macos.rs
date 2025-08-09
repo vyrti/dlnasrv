@@ -125,23 +125,56 @@ impl MacOSNetworkManager {
             Ok(output) if output.status.success() => {
                 let output_str = String::from_utf8_lossy(&output.stdout);
                 interfaces = self.parse_ifconfig_output(&output_str)?;
+                debug!("Parsed {} interfaces from ifconfig", interfaces.len());
             }
             _ => {
-                warn!("Failed to get network interfaces using ifconfig, using fallback");
-                // Fallback to basic interface
-                interfaces.push(NetworkInterface {
-                    name: "en0".to_string(),
-                    ip_address: "127.0.0.1".parse().unwrap(),
-                    is_loopback: false,
-                    is_up: true,
-                    supports_multicast: true,
-                    interface_type: InterfaceType::Ethernet,
-                });
+                warn!("Failed to get network interfaces using ifconfig");
             }
         }
         
         // Filter out loopback interfaces
         interfaces.retain(|iface| !iface.name.starts_with("lo"));
+        
+        // If we didn't find any suitable interfaces, try to create a minimal fallback
+        if interfaces.is_empty() {
+            warn!("No interfaces found via ifconfig, attempting fallback detection");
+            
+            // Try to get the default route interface
+            if let Ok(route_output) = Command::new("route").args(&["get", "default"]).output() {
+                let route_str = String::from_utf8_lossy(&route_output.stdout);
+                if let Some(interface_line) = route_str.lines().find(|line| line.trim().starts_with("interface:")) {
+                    if let Some(iface_name) = interface_line.split(':').nth(1) {
+                        let iface_name = iface_name.trim();
+                        
+                        // Try to get IP for this interface
+                        if let Ok(ip_output) = Command::new("ifconfig").arg(iface_name).output() {
+                            let ip_str = String::from_utf8_lossy(&ip_output.stdout);
+                            if let Some(inet_line) = ip_str.lines().find(|line| line.trim().starts_with("inet ") && !line.contains("inet6")) {
+                                if let Some(ip_part) = inet_line.trim().split_whitespace().nth(1) {
+                                    if let Ok(ip) = ip_part.parse::<IpAddr>() {
+                                        info!("Found fallback interface {} with IP {}", iface_name, ip);
+                                        interfaces.push(NetworkInterface {
+                                            name: iface_name.to_string(),
+                                            ip_address: ip,
+                                            is_loopback: false,
+                                            is_up: true,
+                                            supports_multicast: true,
+                                            interface_type: self.determine_macos_interface_type(iface_name),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Log what we found
+        for iface in &interfaces {
+            info!("Found interface: {} ({}) - up: {}, multicast: {}", 
+                  iface.name, iface.ip_address, iface.is_up, iface.supports_multicast);
+        }
         
         Ok(interfaces)
     }
@@ -153,21 +186,22 @@ impl MacOSNetworkManager {
         let mut current_ip: Option<IpAddr> = None;
         let mut is_up = false;
         let mut supports_multicast = false;
+        let mut status_active = false;
         
         for line in output.lines() {
-            let line = line.trim();
-            
             // Detect interface name (starts at beginning of line and ends with colon)
-            if !line.starts_with('\t') && !line.starts_with(' ') && line.contains(':') {
+            if !line.starts_with('\t') && !line.starts_with(' ') && line.contains(':') && line.contains("flags=") {
                 // Save previous interface if we have one
-                if let (Some(name), Some(ip)) = (&current_interface, &current_ip) {
-                    if !name.starts_with("lo") { // Skip loopback
+                if let Some(name) = &current_interface {
+                    if !name.starts_with("lo") && current_ip.is_some() { // Skip loopback
                         let interface_type = self.determine_macos_interface_type(name);
+                        let final_is_up = is_up && (status_active || name.starts_with("awdl") || name.starts_with("utun"));
+                        
                         interfaces.push(NetworkInterface {
                             name: name.clone(),
-                            ip_address: *ip,
+                            ip_address: current_ip.unwrap(),
                             is_loopback: name.starts_with("lo"),
-                            is_up,
+                            is_up: final_is_up,
                             supports_multicast,
                             interface_type,
                         });
@@ -180,6 +214,7 @@ impl MacOSNetworkManager {
                 current_ip = None;
                 is_up = false;
                 supports_multicast = false;
+                status_active = false;
                 
                 // Check flags in the same line
                 if line.contains("UP") {
@@ -190,30 +225,33 @@ impl MacOSNetworkManager {
                 }
             }
             
-            // Look for IP address
-            if line.contains("inet ") && !line.contains("inet6") {
-                if let Some(ip_part) = line.split_whitespace().nth(1) {
-                    if let Ok(ip) = ip_part.parse::<IpAddr>() {
+            // Look for IPv4 address (skip IPv6)
+            if line.trim().starts_with("inet ") && !line.contains("inet6") {
+                let parts: Vec<&str> = line.trim().split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(ip) = parts[1].parse::<IpAddr>() {
                         current_ip = Some(ip);
                     }
                 }
             }
             
             // Check for status flags
-            if line.contains("status: active") {
-                is_up = true;
+            if line.trim().starts_with("status: active") {
+                status_active = true;
             }
         }
         
         // Don't forget the last interface
-        if let (Some(name), Some(ip)) = (current_interface, current_ip) {
-            if !name.starts_with("lo") { // Skip loopback
+        if let Some(name) = current_interface {
+            if !name.starts_with("lo") && current_ip.is_some() { // Skip loopback
                 let interface_type = self.determine_macos_interface_type(&name);
+                let final_is_up = is_up && (status_active || name.starts_with("awdl") || name.starts_with("utun"));
+                
                 interfaces.push(NetworkInterface {
                     name,
-                    ip_address: ip,
+                    ip_address: current_ip.unwrap(),
                     is_loopback: false,
-                    is_up,
+                    is_up: final_is_up,
                     supports_multicast,
                     interface_type,
                 });
@@ -226,18 +264,22 @@ impl MacOSNetworkManager {
     /// Determine interface type based on macOS interface name
     fn determine_macos_interface_type(&self, name: &str) -> InterfaceType {
         if name.starts_with("en") {
-            // en0 is typically Ethernet, en1+ can be WiFi or additional Ethernet
-            if name == "en0" {
-                InterfaceType::Ethernet
-            } else {
-                // Check if it's WiFi by looking for wireless capabilities
-                // This is a simplified heuristic - real implementation might check more thoroughly
-                InterfaceType::WiFi
-            }
+            // en0 is typically the primary interface (WiFi or Ethernet)
+            // en1+ are usually bridge members or additional interfaces
+            InterfaceType::Ethernet
+        } else if name.starts_with("awdl") {
+            // Apple Wireless Direct Link (AirDrop, etc.)
+            InterfaceType::WiFi
         } else if name.starts_with("utun") || name.starts_with("ipsec") || name.starts_with("ppp") {
             InterfaceType::VPN
         } else if name.starts_with("lo") {
             InterfaceType::Loopback
+        } else if name.starts_with("bridge") || name.starts_with("anpi") {
+            // Bridge interfaces or Apple Network Privacy Interface
+            InterfaceType::Other(format!("Bridge/{}", name))
+        } else if name.starts_with("ap") || name.starts_with("llw") {
+            // Access Point or Low Latency WLAN interfaces
+            InterfaceType::WiFi
         } else {
             InterfaceType::Other(name.to_string())
         }
@@ -245,16 +287,26 @@ impl MacOSNetworkManager {
     
     /// Get the preferred network interface for multicast on macOS
     fn get_preferred_multicast_interface<'a>(&self, interfaces: &'a [NetworkInterface]) -> Option<&'a NetworkInterface> {
-        // Prioritize en0 (primary Ethernet), then other Ethernet, then WiFi
+        // Prioritize active interfaces with IP addresses, then by type
         interfaces.iter()
-            .filter(|iface| !iface.is_loopback && iface.is_up && iface.supports_multicast)
+            .filter(|iface| {
+                !iface.is_loopback && 
+                iface.is_up && 
+                iface.supports_multicast &&
+                // Ensure we have a real IP address (not just link-local)
+                match iface.ip_address {
+                    IpAddr::V4(ipv4) => !ipv4.is_loopback() && !ipv4.is_link_local(),
+                    IpAddr::V6(ipv6) => !ipv6.is_loopback(),
+                }
+            })
             .min_by_key(|iface| {
                 match (&iface.interface_type, iface.name.as_str()) {
-                    (InterfaceType::Ethernet, "en0") => 0, // Primary Ethernet
-                    (InterfaceType::Ethernet, _) => 1,     // Other Ethernet
-                    (InterfaceType::WiFi, _) => 2,         // WiFi
-                    (InterfaceType::VPN, _) => 3,          // VPN
-                    _ => 4,                                // Other
+                    (InterfaceType::Ethernet, "en0") => 0, // Primary interface (usually WiFi on modern Macs)
+                    (InterfaceType::Ethernet, _) if iface.name.starts_with("en") => 1, // Other en interfaces
+                    (InterfaceType::WiFi, "awdl0") => 2,   // Apple Wireless Direct Link
+                    (InterfaceType::WiFi, _) => 3,         // Other WiFi
+                    (InterfaceType::VPN, _) => 4,          // VPN
+                    _ => 5,                                // Other
                 }
             })
     }
@@ -270,6 +322,7 @@ impl MacOSNetworkManager {
             (selected_interface.ip_address, selected_interface.name.clone())
         };
         
+        // Try to enable multicast with better error handling
         match socket.enable_multicast(group, local_addr).await {
             Ok(()) => {
                 info!("Successfully enabled multicast on macOS for group {} via interface {} ({})", 
@@ -277,20 +330,32 @@ impl MacOSNetworkManager {
                 Ok(())
             }
             Err(e) => {
-                warn!("Failed to enable multicast on macOS: {}", e);
+                warn!("Primary multicast enable failed on macOS: {}", e);
                 
-                // Provide macOS-specific troubleshooting advice
-                let mut error_msg = format!("Multicast failed on macOS: {}", e);
-                
-                if !self.is_elevated() && self.requires_elevation(socket.port) {
-                    error_msg.push_str("\nTip: Try running with sudo if using a privileged port.");
+                // Try with 0.0.0.0 as fallback for interface binding
+                match socket.enable_multicast(group, "0.0.0.0".parse().unwrap()).await {
+                    Ok(()) => {
+                        info!("Successfully enabled multicast on macOS using fallback binding for group {}", group);
+                        Ok(())
+                    }
+                    Err(fallback_error) => {
+                        warn!("Fallback multicast enable also failed on macOS: {}", fallback_error);
+                        
+                        // Provide macOS-specific troubleshooting advice
+                        let mut error_msg = format!("Multicast failed on macOS (tried {} and fallback): {} / {}", 
+                                                   local_addr, e, fallback_error);
+                        
+                        if !self.is_elevated() && self.requires_elevation(socket.port) {
+                            error_msg.push_str("\nTip: Try running with sudo if using a privileged port.");
+                        }
+                        
+                        error_msg.push_str("\nTip: Check macOS System Preferences > Security & Privacy > Firewall settings.");
+                        error_msg.push_str("\nTip: Ensure the network interface supports multicast.");
+                        error_msg.push_str(&format!("\nTip: Interface {} ({}) may not support multicast properly.", interface_name, local_addr));
+                        
+                        Err(PlatformError::NetworkConfig(error_msg))
+                    }
                 }
-                
-                error_msg.push_str("\nTip: Check macOS System Preferences > Security & Privacy > Firewall settings.");
-                error_msg.push_str("\nTip: Ensure the network interface supports multicast.");
-                error_msg.push_str(&format!("\nTip: Try using interface {} explicitly.", interface_name));
-                
-                Err(PlatformError::NetworkConfig(error_msg))
             }
         }
     }

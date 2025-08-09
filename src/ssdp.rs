@@ -230,8 +230,14 @@ async fn send_ssdp_alive(config: &AppConfig, network_manager: &PlatformNetworkMa
         }
     }
 
-    let socket = socket.unwrap();
+    let mut socket = socket.unwrap();
     let socket_port = socket.port;
+
+    // Enable multicast on the announcement socket
+    let multicast_addr = SSDP_MULTICAST_ADDR.parse().unwrap();
+    if let Err(e) = network_manager.join_multicast_group(&mut socket, multicast_addr, None).await {
+        warn!("Failed to enable multicast on announcement socket: {}", e);
+    }
 
     let message = format!(
         "NOTIFY * HTTP/1.1\r\n\

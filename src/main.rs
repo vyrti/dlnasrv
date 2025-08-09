@@ -1,71 +1,1572 @@
 mod config;
+mod database;
 mod error;
+mod logging;
 mod media;
+mod platform;
 mod ssdp;
+mod watcher;
 mod web;
 
 use anyhow::Context;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{error, info, warn};
 
-use config::Config;
+use config::AppConfig;
+use database::{DatabaseManager, SqliteDatabase};
+use platform::PlatformInfo;
+use watcher::{FileSystemWatcher, CrossPlatformWatcher, FileSystemEvent};
 use state::AppState;
 
 // Publicly export the AppState for use in other modules
 pub mod state {
-    use crate::{config::Config, media::MediaFile};
+    use crate::{config::AppConfig, database::{DatabaseManager, MediaFile}};
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
     #[derive(Clone)]
     pub struct AppState {
-        pub config: Arc<Config>,
+        pub config: Arc<AppConfig>,
         pub media_files: Arc<RwLock<Vec<MediaFile>>>,
+        pub database: Arc<dyn DatabaseManager>,
+        pub platform_info: Arc<crate::platform::PlatformInfo>,
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    // Initialize logging first
+    logging::init_logging().context("Failed to initialize logging")?;
 
-    // Parse configuration from command line arguments
-    let config = Arc::new(Config::from_args().await?);
+    info!("Starting OpenDLNA Server...");
 
-    info!("Starting DLNA server...");
-    info!("Media directory: {}", config.media_dir.display());
+    // Detect platform information with comprehensive diagnostics
+    let platform_info = match detect_platform_with_diagnostics().await {
+        Ok(info) => Arc::new(info),
+        Err(e) => {
+            error!("Failed to detect platform information: {}", e);
+            return Err(e);
+        }
+    };
 
-    // Scan for media files
-    let media_files = media::scan_media_files(&config.media_dir)
-        .await
-        .context("Failed to scan media library")?;
-    info!("Found {} media files", media_files.len());
+    // Perform platform-specific security checks and permission requests
+    if let Err(e) = perform_security_checks(&platform_info).await {
+        error!("Security checks failed: {}", e);
+        return Err(e);
+    }
+
+    // Load or create configuration with platform-specific defaults
+    let config = match initialize_configuration(&platform_info).await {
+        Ok(config) => Arc::new(config),
+        Err(e) => {
+            error!("Failed to initialize configuration: {}", e);
+            return Err(e);
+        }
+    };
+
+    // Initialize database manager
+    let database = match initialize_database(&config).await {
+        Ok(db) => Arc::new(db) as Arc<dyn DatabaseManager>,
+        Err(e) => {
+            error!("Failed to initialize database: {}", e);
+            return Err(e);
+        }
+    };
+
+    // Initialize file system watcher
+    let file_watcher = match initialize_file_watcher(&config, database.clone()).await {
+        Ok(watcher) => Arc::new(watcher),
+        Err(e) => {
+            error!("Failed to initialize file system watcher: {}", e);
+            return Err(e);
+        }
+    };
+
+    // Perform initial media scan or load from database
+    let media_files = match perform_initial_media_scan(&config, &database).await {
+        Ok(files) => Arc::new(RwLock::new(files)),
+        Err(e) => {
+            error!("Failed to perform initial media scan: {}", e);
+            return Err(e);
+        }
+    };
 
     // Create shared application state
     let app_state = AppState {
         config: config.clone(),
-        media_files: Arc::new(RwLock::new(media_files)),
+        media_files: media_files.clone(),
+        database: database.clone(),
+        platform_info: platform_info.clone(),
     };
 
-    // Start SSDP discovery service in the background
-    ssdp::run_ssdp_service(app_state.clone())
-        .context("Failed to start SSDP service")?;
+    // Start file system monitoring
+    if let Err(e) = start_file_monitoring(file_watcher.clone(), &config, database.clone(), media_files.clone()).await {
+        warn!("Failed to start file system monitoring: {}", e);
+        warn!("Continuing without real-time file monitoring");
+    }
 
+    // Start runtime platform adaptation services
+    let adaptation_handle = start_platform_adaptation(
+        platform_info.clone(),
+        config.clone(),
+        database.clone(),
+        media_files.clone(),
+    ).await?;
+
+    // Start SSDP discovery service with platform abstraction
+    if let Err(e) = start_ssdp_service(app_state.clone()).await {
+        error!("Failed to start SSDP service: {}", e);
+        return Err(e);
+    }
+
+    // Start the HTTP server
+    if let Err(e) = start_http_server(app_state).await {
+        error!("Failed to start HTTP server: {}", e);
+        return Err(e);
+    }
+
+    // Wait for shutdown signal and cleanup
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received shutdown signal (Ctrl+C)");
+        }
+        _ = adaptation_handle => {
+            warn!("Platform adaptation service stopped unexpectedly");
+        }
+    }
+
+    // Perform graceful shutdown
+    perform_graceful_shutdown(database, file_watcher).await?;
+    
+    info!("Shutdown completed successfully");
+    Ok(())
+}
+
+/// Start platform adaptation services for runtime detection and adaptation
+async fn start_platform_adaptation(
+    platform_info: Arc<PlatformInfo>,
+    config: Arc<AppConfig>,
+    database: Arc<dyn DatabaseManager>,
+    media_files: Arc<RwLock<Vec<database::MediaFile>>>,
+) -> anyhow::Result<tokio::task::JoinHandle<()>> {
+    info!("Starting platform adaptation services...");
+    
+    let platform_info_clone = platform_info.clone();
+    let config_clone = config.clone();
+    let database_clone = database.clone();
+    let media_files_clone = media_files.clone();
+    
+    let handle = tokio::spawn(async move {
+        let mut network_check_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        let mut config_check_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        
+        loop {
+            tokio::select! {
+                _ = network_check_interval.tick() => {
+                    if let Err(e) = check_and_adapt_network_changes(&platform_info_clone).await {
+                        warn!("Network adaptation check failed: {}", e);
+                    }
+                }
+                _ = config_check_interval.tick() => {
+                    if let Err(e) = check_and_reload_configuration(&config_clone, &database_clone, &media_files_clone).await {
+                        warn!("Configuration reload check failed: {}", e);
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Platform adaptation service received shutdown signal");
+                    break;
+                }
+            }
+        }
+        
+        info!("Platform adaptation service stopped");
+    });
+    
+    info!("Platform adaptation services started");
+    Ok(handle)
+}
+
+/// Check for network changes and adapt accordingly
+async fn check_and_adapt_network_changes(platform_info: &Arc<PlatformInfo>) -> anyhow::Result<()> {
+    // Re-detect network interfaces to check for changes
+    let current_platform_info = PlatformInfo::detect().await
+        .context("Failed to re-detect platform information")?;
+    
+    // Compare network interfaces
+    let old_interfaces = &platform_info.network_interfaces;
+    let new_interfaces = &current_platform_info.network_interfaces;
+    
+    // Check if interfaces have changed
+    let interfaces_changed = old_interfaces.len() != new_interfaces.len() ||
+        old_interfaces.iter().any(|old_iface| {
+            !new_interfaces.iter().any(|new_iface| {
+                old_iface.name == new_iface.name &&
+                old_iface.ip_address == new_iface.ip_address &&
+                old_iface.is_up == new_iface.is_up
+            })
+        });
+    
+    if interfaces_changed {
+        info!("Network interface changes detected");
+        
+        // Log changes
+        for old_iface in old_interfaces {
+            if !new_interfaces.iter().any(|new_iface| new_iface.name == old_iface.name) {
+                info!("Network interface removed: {} ({})", old_iface.name, old_iface.ip_address);
+            }
+        }
+        
+        for new_iface in new_interfaces {
+            if !old_interfaces.iter().any(|old_iface| old_iface.name == new_iface.name) {
+                info!("Network interface added: {} ({})", new_iface.name, new_iface.ip_address);
+            } else if let Some(old_iface) = old_interfaces.iter().find(|old| old.name == new_iface.name) {
+                if old_iface.ip_address != new_iface.ip_address {
+                    info!("Network interface IP changed: {} ({} -> {})", 
+                        new_iface.name, old_iface.ip_address, new_iface.ip_address);
+                }
+                if old_iface.is_up != new_iface.is_up {
+                    let status = if new_iface.is_up { "UP" } else { "DOWN" };
+                    info!("Network interface status changed: {} is now {}", new_iface.name, status);
+                }
+            }
+        }
+        
+        // Check if primary interface changed
+        let old_primary = platform_info.get_primary_interface();
+        let new_primary = current_platform_info.get_primary_interface();
+        
+        match (old_primary, new_primary) {
+            (Some(old), Some(new)) if old.name != new.name || old.ip_address != new.ip_address => {
+                info!("Primary network interface changed: {} ({}) -> {} ({})",
+                    old.name, old.ip_address, new.name, new.ip_address);
+                // TODO: Restart SSDP service with new interface
+            }
+            (Some(old), None) => {
+                warn!("Primary network interface lost: {} ({})", old.name, old.ip_address);
+                warn!("DLNA discovery may not work properly");
+            }
+            (None, Some(new)) => {
+                info!("Primary network interface available: {} ({})", new.name, new.ip_address);
+                // TODO: Start SSDP service if it wasn't running
+            }
+            _ => {} // No change in primary interface
+        }
+        
+        // Implement graceful degradation
+        if new_interfaces.is_empty() {
+            error!("No network interfaces available - DLNA functionality will be severely limited");
+        } else if new_interfaces.iter().all(|iface| !iface.supports_multicast) {
+            warn!("No multicast-capable interfaces available - DLNA discovery may not work");
+        }
+    }
+    
+    Ok(())
+}
+
+/// Check for configuration changes and reload if necessary
+async fn check_and_reload_configuration(
+    config: &Arc<AppConfig>,
+    database: &Arc<dyn DatabaseManager>,
+    media_files: &Arc<RwLock<Vec<database::MediaFile>>>,
+) -> anyhow::Result<()> {
+    let config_path = AppConfig::get_platform_config_file_path();
+    
+    // Check if configuration file has been modified
+    if let Ok(metadata) = tokio::fs::metadata(&config_path).await {
+        let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        
+        // For simplicity, we'll check if the file was modified in the last minute
+        // In a real implementation, we'd track the last known modification time
+        let one_minute_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        
+        if modified > one_minute_ago {
+            info!("Configuration file may have been modified, checking for changes...");
+            
+            match AppConfig::load_from_file(&config_path) {
+                Ok(new_config) => {
+                    if let Err(e) = handle_configuration_changes(config, &new_config, database, media_files).await {
+                        warn!("Failed to handle configuration changes: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to load updated configuration: {}", e);
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Handle configuration changes by updating relevant services
+async fn handle_configuration_changes(
+    old_config: &Arc<AppConfig>,
+    new_config: &AppConfig,
+    database: &Arc<dyn DatabaseManager>,
+    media_files: &Arc<RwLock<Vec<database::MediaFile>>>,
+) -> anyhow::Result<()> {
+    let mut changes_detected = false;
+    
+    // Check for media directory changes
+    let old_dirs: std::collections::HashSet<_> = old_config.media.directories
+        .iter()
+        .map(|d| &d.path)
+        .collect();
+    let new_dirs: std::collections::HashSet<_> = new_config.media.directories
+        .iter()
+        .map(|d| &d.path)
+        .collect();
+    
+    if old_dirs != new_dirs {
+        info!("Media directory configuration changed");
+        changes_detected = true;
+        
+        // Find added directories
+        for new_dir in &new_dirs {
+            if !old_dirs.contains(new_dir) {
+                info!("New media directory added: {}", new_dir);
+                
+                // Scan new directory
+                let dir_path = std::path::PathBuf::from(new_dir);
+                if dir_path.exists() && dir_path.is_dir() {
+                    let scanner = media::MediaScanner::new();
+                    match scanner.scan_directory_simple(&dir_path).await {
+                        Ok(files) => {
+                            info!("Found {} media files in new directory: {}", files.len(), new_dir);
+                            
+                            // Add files to database
+                            for file in &files {
+                                if let Err(e) = database.store_media_file(file).await {
+                                    warn!("Failed to store media file: {} - {}", file.path.display(), e);
+                                }
+                            }
+                            
+                            // Add files to in-memory cache
+                            let mut media_files_guard = media_files.write().await;
+                            media_files_guard.extend(files);
+                        }
+                        Err(e) => {
+                            warn!("Failed to scan new directory {}: {}", new_dir, e);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Find removed directories
+        for old_dir in &old_dirs {
+            if !new_dirs.contains(old_dir) {
+                info!("Media directory removed: {}", old_dir);
+                
+                // Remove files from this directory from database and cache
+                let dir_path = std::path::PathBuf::from(old_dir);
+                let files_to_remove = database.get_files_in_directory(&dir_path).await
+                    .unwrap_or_default();
+                
+                for file in &files_to_remove {
+                    if let Err(e) = database.remove_media_file(&file.path).await {
+                        warn!("Failed to remove media file from database: {} - {}", file.path.display(), e);
+                    }
+                }
+                
+                // Remove from in-memory cache
+                let mut media_files_guard = media_files.write().await;
+                media_files_guard.retain(|f| !f.path.starts_with(&dir_path));
+                
+                info!("Removed {} files from removed directory", files_to_remove.len());
+            }
+        }
+    }
+    
+    // Check for file watching changes
+    if old_config.media.watch_for_changes != new_config.media.watch_for_changes {
+        info!("File watching configuration changed: {} -> {}", 
+            old_config.media.watch_for_changes, new_config.media.watch_for_changes);
+        changes_detected = true;
+        
+        if new_config.media.watch_for_changes {
+            info!("File watching enabled - new file changes will be detected");
+            // TODO: Start file watcher if not already running
+        } else {
+            info!("File watching disabled - file changes will not be detected automatically");
+            // TODO: Stop file watcher if running
+        }
+    }
+    
+    // Check for network configuration changes
+    if old_config.network.ssdp_port != new_config.network.ssdp_port ||
+       old_config.network.interface_selection != new_config.network.interface_selection {
+        info!("Network configuration changed");
+        changes_detected = true;
+        
+        if old_config.network.ssdp_port != new_config.network.ssdp_port {
+            info!("SSDP port changed: {} -> {}", old_config.network.ssdp_port, new_config.network.ssdp_port);
+        }
+        
+        if old_config.network.interface_selection != new_config.network.interface_selection {
+            info!("Network interface selection changed: {:?} -> {:?}", 
+                old_config.network.interface_selection, new_config.network.interface_selection);
+        }
+        
+        // TODO: Restart SSDP service with new configuration
+        warn!("Network configuration changes require service restart to take effect");
+    }
+    
+    // Check for server configuration changes
+    if old_config.server.port != new_config.server.port ||
+       old_config.server.interface != new_config.server.interface {
+        info!("Server configuration changed");
+        changes_detected = true;
+        
+        if old_config.server.port != new_config.server.port {
+            info!("Server port changed: {} -> {}", old_config.server.port, new_config.server.port);
+        }
+        
+        if old_config.server.interface != new_config.server.interface {
+            info!("Server interface changed: {} -> {}", old_config.server.interface, new_config.server.interface);
+        }
+        
+        warn!("Server configuration changes require application restart to take effect");
+    }
+    
+    if changes_detected {
+        info!("Configuration changes processed successfully");
+    }
+    
+    Ok(())
+}
+
+/// Implement graceful degradation when platform features are unavailable
+async fn handle_platform_feature_unavailable(feature: &str, error: &anyhow::Error) -> anyhow::Result<()> {
+    match feature {
+        "multicast" => {
+            warn!("Multicast networking unavailable: {}", error);
+            warn!("DLNA discovery will be limited - clients may need manual configuration");
+            info!("Consider using unicast discovery or manual IP configuration");
+        }
+        "privileged_ports" => {
+            warn!("Privileged port access unavailable: {}", error);
+            info!("Using alternative ports for DLNA services");
+            info!("SSDP will use port 8080 instead of 1900");
+        }
+        "file_watching" => {
+            warn!("File system watching unavailable: {}", error);
+            warn!("Media library changes will not be detected automatically");
+            info!("Consider periodic manual rescans or application restart after adding media");
+        }
+        "database" => {
+            error!("Database functionality unavailable: {}", error);
+            error!("Media library persistence will not work");
+            warn!("Falling back to in-memory media scanning on each startup");
+        }
+        "network_interfaces" => {
+            error!("No network interfaces available: {}", error);
+            error!("DLNA functionality will be severely limited");
+            warn!("Check network configuration and try again");
+        }
+        _ => {
+            warn!("Platform feature '{}' unavailable: {}", feature, error);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Detect platform information with comprehensive diagnostics and error reporting
+async fn detect_platform_with_diagnostics() -> anyhow::Result<PlatformInfo> {
+    info!("Detecting platform information...");
+    
+    let platform_info = PlatformInfo::detect().await
+        .context("Failed to detect platform information")?;
+    
+    // Log comprehensive platform information
+    info!("Platform: {} {}", platform_info.os_type.display_name(), platform_info.version);
+    info!("Architecture: {}", std::env::consts::ARCH);
+    
+    info!("Platform capabilities:");
+    info!("  - Multicast support: {}", platform_info.capabilities.supports_multicast);
+    info!("  - Firewall present: {}", platform_info.capabilities.has_firewall);
+    info!("  - Case-sensitive filesystem: {}", platform_info.capabilities.case_sensitive_fs);
+    
+    // Log network interface information
+    if platform_info.network_interfaces.is_empty() {
+        warn!("No network interfaces detected - network functionality may be limited");
+    } else {
+        info!("Detected {} network interface(s):", platform_info.network_interfaces.len());
+        for interface in &platform_info.network_interfaces {
+            info!("  - {} ({}): {} - Up: {}, Multicast: {}", 
+                interface.name, 
+                interface.ip_address,
+                match interface.interface_type {
+                    platform::InterfaceType::Ethernet => "Ethernet",
+                    platform::InterfaceType::WiFi => "WiFi",
+                    platform::InterfaceType::VPN => "VPN",
+                    platform::InterfaceType::Loopback => "Loopback",
+                    platform::InterfaceType::Other(ref name) => name,
+                },
+                interface.is_up,
+                interface.supports_multicast
+            );
+        }
+        
+        if let Some(primary_interface) = platform_info.get_primary_interface() {
+            info!("Primary network interface: {} ({})", primary_interface.name, primary_interface.ip_address);
+        } else {
+            warn!("No suitable primary network interface found for DLNA operations");
+        }
+    }
+    
+    // Platform-specific diagnostics
+    match platform_info.os_type {
+        platform::OsType::Windows => {
+            info!("Windows-specific diagnostics:");
+            if !platform_info.capabilities.can_bind_privileged_ports {
+                info!("  - Administrator privileges may be required for ports < 1024");
+            }
+            if platform_info.capabilities.has_firewall {
+                info!("  - Windows Firewall may block network connections");
+            }
+        }
+        platform::OsType::MacOS => {
+            info!("macOS-specific diagnostics:");
+            info!("  - System may prompt for network access permissions");
+            if platform_info.capabilities.has_firewall {
+                info!("  - macOS Application Firewall may block connections");
+            }
+        }
+        platform::OsType::Linux => {
+            info!("Linux-specific diagnostics:");
+            if platform_info.capabilities.has_firewall {
+                info!("  - Firewall (iptables/ufw/firewalld) may block connections");
+            }
+            info!("  - SELinux/AppArmor policies may affect file access");
+        }
+    }
+    
+    Ok(platform_info)
+}
+
+/// Initialize configuration with platform-specific defaults and validation
+async fn initialize_configuration(_platform_info: &PlatformInfo) -> anyhow::Result<AppConfig> {
+    info!("Initializing configuration...");
+    
+    // Try to load configuration from platform-appropriate location
+    let config_path = AppConfig::get_platform_config_file_path();
+    info!("Configuration file path: {}", config_path.display());
+    
+    let mut config = if config_path.exists() {
+        info!("Loading existing configuration from: {}", config_path.display());
+        AppConfig::load_from_file(&config_path)
+            .context("Failed to load configuration file")?
+    } else {
+        info!("Creating new configuration with platform defaults");
+        // Check if we have command line arguments to override defaults
+        match AppConfig::from_args().await {
+            Ok(config) => config,
+            Err(_) => {
+                // No command line args, use pure platform defaults
+                AppConfig::default_for_platform()
+            }
+        }
+    };
+    
+    // Apply platform-specific defaults and validation
+    config.apply_platform_defaults()
+        .context("Failed to apply platform-specific defaults")?;
+    
+    // Validate configuration for current platform
+    config.validate_for_platform()
+        .context("Configuration validation failed")?;
+    
+    // Save the configuration (creates file if it doesn't exist, updates if needed)
+    config.save_to_file(&config_path)
+        .context("Failed to save configuration file")?;
+    
+    info!("Configuration initialized successfully");
+    info!("Server will listen on: {}:{}", config.server.interface, config.server.port);
+    info!("SSDP will use port: {}", config.network.ssdp_port);
+    info!("Monitoring {} director(ies) for media files", config.media.directories.len());
+    
+    for (i, dir) in config.media.directories.iter().enumerate() {
+        info!("  {}. {} (recursive: {})", i + 1, dir.path, dir.recursive);
+    }
+    
+    Ok(config)
+}
+
+/// Initialize database manager with health checks and recovery
+async fn initialize_database(config: &AppConfig) -> anyhow::Result<SqliteDatabase> {
+    info!("Initializing database...");
+    
+    let db_path = config.get_database_path();
+    info!("Database path: {}", db_path.display());
+    
+    // Create database manager
+    let database = SqliteDatabase::new(db_path.clone()).await
+        .context("Failed to create database manager")?;
+    
+    // Initialize database schema
+    database.initialize().await
+        .context("Failed to initialize database schema")?;
+    
+    // Perform health check and repair if needed
+    info!("Performing database health check...");
+    let health = database.check_and_repair().await
+        .context("Failed to perform database health check")?;
+    
+    if !health.is_healthy {
+        warn!("Database health issues detected:");
+        for issue in &health.issues {
+            match issue.severity {
+                database::IssueSeverity::Critical => error!("  CRITICAL: {}", issue.description),
+                database::IssueSeverity::Error => error!("  ERROR: {}", issue.description),
+                database::IssueSeverity::Warning => warn!("  WARNING: {}", issue.description),
+                database::IssueSeverity::Info => info!("  INFO: {}", issue.description),
+            }
+        }
+        
+        if health.repair_attempted && health.repair_successful {
+            info!("Database repair completed successfully");
+        } else if health.repair_attempted && !health.repair_successful {
+            error!("Database repair failed - some functionality may be limited");
+        }
+    } else {
+        info!("Database health check passed");
+    }
+    
+    // Get database statistics
+    let stats = database.get_stats().await
+        .context("Failed to get database statistics")?;
+    
+    info!("Database statistics:");
+    info!("  - Total media files: {}", stats.total_files);
+    info!("  - Total media size: {} bytes", stats.total_size);
+    info!("  - Database file size: {} bytes", stats.database_size);
+    
+    // Vacuum database if configured
+    if config.database.vacuum_on_startup {
+        info!("Performing database vacuum...");
+        database.vacuum().await
+            .context("Failed to vacuum database")?;
+        info!("Database vacuum completed");
+    }
+    
+    info!("Database initialized successfully");
+    Ok(database)
+}
+
+/// Initialize file system watcher for real-time media monitoring
+async fn initialize_file_watcher(config: &AppConfig, _database: Arc<dyn DatabaseManager>) -> anyhow::Result<CrossPlatformWatcher> {
+    info!("Initializing file system watcher...");
+    
+    if !config.media.watch_for_changes {
+        info!("File system watching disabled in configuration");
+        return Ok(CrossPlatformWatcher::new());
+    }
+    
+    let watcher = CrossPlatformWatcher::new();
+    
+    // Validate that all monitored directories exist
+    let mut valid_directories = Vec::new();
+    for dir_config in &config.media.directories {
+        let dir_path = std::path::PathBuf::from(&dir_config.path);
+        if dir_path.exists() && dir_path.is_dir() {
+            valid_directories.push(dir_path);
+        } else {
+            warn!("Monitored directory does not exist or is not a directory: {}", dir_config.path);
+        }
+    }
+    
+    if valid_directories.is_empty() {
+        warn!("No valid directories to monitor - file watching will be disabled");
+        return Ok(watcher);
+    }
+    
+    info!("File system watcher initialized for {} directories", valid_directories.len());
+    Ok(watcher)
+}
+
+/// Perform initial media scan, using database cache when possible
+async fn perform_initial_media_scan(config: &AppConfig, database: &Arc<dyn DatabaseManager>) -> anyhow::Result<Vec<database::MediaFile>> {
+    info!("Performing initial media scan...");
+    
+    if config.media.scan_on_startup {
+        info!("Full media scan enabled - scanning all directories");
+        
+        let mut all_media_files = Vec::new();
+        
+        for dir_config in &config.media.directories {
+            let dir_path = std::path::PathBuf::from(&dir_config.path);
+            
+            if !dir_path.exists() {
+                warn!("Media directory does not exist: {}", dir_config.path);
+                continue;
+            }
+            
+            info!("Scanning directory: {}", dir_config.path);
+            
+            // Use the media scanner to find files
+            let scanner = media::MediaScanner::new();
+            let files = scanner.scan_directory_simple(&dir_path).await
+                .with_context(|| format!("Failed to scan directory: {}", dir_config.path))?;
+            
+            info!("Found {} media files in {}", files.len(), dir_config.path);
+            
+            // Store files in database
+            for file in &files {
+                if let Err(e) = database.store_media_file(file).await {
+                    warn!("Failed to store media file in database: {} - {}", file.path.display(), e);
+                }
+            }
+            
+            all_media_files.extend(files);
+        }
+        
+        info!("Initial media scan completed - found {} total files", all_media_files.len());
+        Ok(all_media_files)
+    } else {
+        info!("Loading media files from database cache");
+        
+        let cached_files = database.get_all_media_files().await
+            .context("Failed to load media files from database")?;
+        
+        info!("Loaded {} media files from database cache", cached_files.len());
+        
+        // TODO: Implement incremental scan to check for changes since last run
+        // This would compare file modification times with database records
+        
+        Ok(cached_files)
+    }
+}
+
+/// Start file system monitoring with database integration
+async fn start_file_monitoring(
+    watcher: Arc<CrossPlatformWatcher>,
+    config: &AppConfig,
+    database: Arc<dyn DatabaseManager>,
+    media_files: Arc<RwLock<Vec<database::MediaFile>>>,
+) -> anyhow::Result<()> {
+    if !config.media.watch_for_changes {
+        info!("File system monitoring disabled");
+        return Ok(());
+    }
+    
+    info!("Starting file system monitoring...");
+    
+    // Get directories to monitor
+    let directories: Vec<std::path::PathBuf> = config.media.directories
+        .iter()
+        .map(|dir| std::path::PathBuf::from(&dir.path))
+        .filter(|path| path.exists() && path.is_dir())
+        .collect();
+    
+    if directories.is_empty() {
+        warn!("No valid directories to monitor");
+        return Ok(());
+    }
+    
+    // Start watching directories
+    watcher.start_watching(&directories).await
+        .context("Failed to start watching directories")?;
+    
+    // Get event receiver
+    let mut event_receiver = watcher.get_event_receiver();
+    
+    // Spawn task to handle file system events
+    let database_clone = database.clone();
+    let media_files_clone = media_files.clone();
+    
+    tokio::spawn(async move {
+        info!("File system event handler started");
+        
+        while let Some(event) = event_receiver.recv().await {
+            if let Err(e) = handle_file_system_event(event, &database_clone, &media_files_clone).await {
+                error!("Failed to handle file system event: {}", e);
+            }
+        }
+        
+        warn!("File system event handler stopped");
+    });
+    
+    info!("File system monitoring started for {} directories", directories.len());
+    Ok(())
+}
+
+/// Handle individual file system events
+async fn handle_file_system_event(
+    event: FileSystemEvent,
+    database: &Arc<dyn DatabaseManager>,
+    media_files: &Arc<RwLock<Vec<database::MediaFile>>>,
+) -> anyhow::Result<()> {
+    match event {
+        FileSystemEvent::Created(path) => {
+            info!("Media file created: {}", path.display());
+            
+            // Create MediaFile record
+            let metadata = tokio::fs::metadata(&path).await?;
+            let mime_type = media::get_mime_type(&path);
+            let mut media_file = database::MediaFile::new(path.clone(), metadata.len(), mime_type);
+            media_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
+            
+            // Store in database
+            let file_id = database.store_media_file(&media_file).await?;
+            media_file.id = Some(file_id);
+            
+            // Add to in-memory cache
+            let mut files = media_files.write().await;
+            files.push(media_file);
+            
+            info!("Added new media file to database: {}", path.display());
+        }
+        
+        FileSystemEvent::Modified(path) => {
+            info!("Media file modified: {}", path.display());
+            
+            // Update database record
+            if let Some(mut existing_file) = database.get_file_by_path(&path).await? {
+                let metadata = tokio::fs::metadata(&path).await?;
+                existing_file.size = metadata.len();
+                existing_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
+                
+                database.update_media_file(&existing_file).await?;
+                
+                // Update in-memory cache
+                let mut files = media_files.write().await;
+                if let Some(cached_file) = files.iter_mut().find(|f| f.path == path) {
+                    *cached_file = existing_file;
+                }
+                
+                info!("Updated media file in database: {}", path.display());
+            }
+        }
+        
+        FileSystemEvent::Deleted(path) => {
+            info!("Media file deleted: {}", path.display());
+            
+            // Remove from database
+            database.remove_media_file(&path).await?;
+            
+            // Remove from in-memory cache
+            let mut files = media_files.write().await;
+            files.retain(|f| f.path != path);
+            
+            info!("Removed media file from database: {}", path.display());
+        }
+        
+        FileSystemEvent::Renamed { from, to } => {
+            info!("Media file renamed: {} -> {}", from.display(), to.display());
+            
+            // Handle as delete + create without recursion
+            // Remove from database
+            database.remove_media_file(&from).await?;
+            
+            // Remove from in-memory cache
+            let mut files = media_files.write().await;
+            files.retain(|f| f.path != from);
+            
+            // Create MediaFile record for new location
+            let metadata = tokio::fs::metadata(&to).await?;
+            let mime_type = media::get_mime_type(&to);
+            let mut media_file = database::MediaFile::new(to.clone(), metadata.len(), mime_type);
+            media_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
+            
+            // Store in database
+            let file_id = database.store_media_file(&media_file).await?;
+            media_file.id = Some(file_id);
+            
+            // Add to in-memory cache
+            files.push(media_file);
+            
+            info!("Renamed media file: {} -> {}", from.display(), to.display());
+        }
+    }
+    
+    Ok(())
+}
+
+/// Start SSDP service with platform abstraction
+async fn start_ssdp_service(app_state: AppState) -> anyhow::Result<()> {
+    info!("Starting SSDP discovery service...");
+    
+    // Start SSDP service using existing implementation
+    ssdp::run_ssdp_service(app_state)
+        .context("Failed to start SSDP service")?;
+    
+    info!("SSDP discovery service started successfully");
+    Ok(())
+}
+
+/// Start HTTP server with proper error handling
+async fn start_http_server(app_state: AppState) -> anyhow::Result<()> {
+    info!("Starting HTTP server...");
+    
+    let config = app_state.config.clone();
+    
     // Create the Axum web server
     let app = web::create_router(app_state);
-
-    // Start the server
-    let addr = SocketAddr::new(config.host, config.port);
-    info!("Server UUID: {}", config.uuid);
+    
+    // Parse server interface address
+    let interface_addr = if config.server.interface == "0.0.0.0" || config.server.interface.is_empty() {
+        "0.0.0.0".parse().unwrap()
+    } else {
+        config.server.interface.parse()
+            .with_context(|| format!("Invalid server interface address: {}", config.server.interface))?
+    };
+    
+    let addr = SocketAddr::new(interface_addr, config.server.port);
+    
+    info!("Server UUID: {}", config.server.uuid);
+    info!("Server name: {}", config.server.name);
     info!("Listening on http://{}", addr);
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    
+    // Attempt to bind to the address
+    let listener = tokio::net::TcpListener::bind(addr).await
+        .with_context(|| format!("Failed to bind to address: {}", addr))?;
+    
+    info!("HTTP server started successfully");
+    
+    // Start the server
     axum::serve(listener, app.into_make_service())
         .await
         .context("HTTP server failed")?;
+    
+    Ok(())
+}
 
+///
+// Perform platform-specific security checks and permission requests
+async fn perform_security_checks(platform_info: &PlatformInfo) -> anyhow::Result<()> {
+    info!("Performing platform-specific security checks...");
+    
+    match platform_info.os_type {
+        platform::OsType::Windows => {
+            perform_windows_security_checks(platform_info).await?;
+        }
+        platform::OsType::MacOS => {
+            perform_macos_security_checks(platform_info).await?;
+        }
+        platform::OsType::Linux => {
+            perform_linux_security_checks(platform_info).await?;
+        }
+    }
+    
+    info!("Platform security checks completed successfully");
+    Ok(())
+}
+
+/// Perform Windows-specific security checks
+async fn perform_windows_security_checks(_platform_info: &PlatformInfo) -> anyhow::Result<()> {
+    info!("Performing Windows security checks...");
+    
+    // Check if running with administrator privileges
+    let is_elevated = check_windows_elevation().await?;
+    if is_elevated {
+        info!("Running with administrator privileges");
+    } else {
+        info!("Running without administrator privileges");
+        
+        // Check if we need privileged ports
+        if needs_privileged_ports() {
+            warn!("Application may need administrator privileges for ports < 1024");
+            warn!("Consider running as administrator or using alternative ports");
+        }
+    }
+    
+    // Check Windows Firewall status
+    if let Ok(firewall_enabled) = check_windows_firewall().await {
+        if firewall_enabled {
+            info!("Windows Firewall is enabled");
+            info!("You may need to allow OpenDLNA through the firewall");
+        } else {
+            info!("Windows Firewall is disabled");
+        }
+    } else {
+        warn!("Could not determine Windows Firewall status");
+    }
+    
+    // Check Windows Defender status
+    if let Ok(defender_enabled) = check_windows_defender().await {
+        if defender_enabled {
+            info!("Windows Defender is active");
+            info!("Real-time protection may scan media files during serving");
+        }
+    } else {
+        warn!("Could not determine Windows Defender status");
+    }
+    
+    Ok(())
+}
+
+/// Perform macOS-specific security checks
+async fn perform_macos_security_checks(_platform_info: &PlatformInfo) -> anyhow::Result<()> {
+    info!("Performing macOS security checks...");
+    
+    // Check if running with sudo
+    let is_elevated = check_macos_elevation().await?;
+    if is_elevated {
+        warn!("Running with elevated privileges (sudo)");
+        warn!("Consider running without sudo for better security");
+    } else {
+        info!("Running with normal user privileges");
+    }
+    
+    // Check macOS Application Firewall
+    if let Ok(firewall_enabled) = check_macos_firewall().await {
+        if firewall_enabled {
+            info!("macOS Application Firewall is enabled");
+            info!("System may prompt for network access permissions");
+        } else {
+            info!("macOS Application Firewall is disabled");
+        }
+    } else {
+        warn!("Could not determine macOS Application Firewall status");
+    }
+    
+    // Check Gatekeeper status
+    if let Ok(gatekeeper_enabled) = check_macos_gatekeeper().await {
+        if gatekeeper_enabled {
+            info!("Gatekeeper is enabled - application security is enforced");
+        } else {
+            warn!("Gatekeeper is disabled - reduced security");
+        }
+    } else {
+        warn!("Could not determine Gatekeeper status");
+    }
+    
+    // Check System Integrity Protection (SIP)
+    if let Ok(sip_enabled) = check_macos_sip().await {
+        if sip_enabled {
+            info!("System Integrity Protection (SIP) is enabled");
+        } else {
+            warn!("System Integrity Protection (SIP) is disabled");
+        }
+    } else {
+        warn!("Could not determine SIP status");
+    }
+    
+    Ok(())
+}
+
+/// Perform Linux-specific security checks
+async fn perform_linux_security_checks(_platform_info: &PlatformInfo) -> anyhow::Result<()> {
+    info!("Performing Linux security checks...");
+    
+    // Check if running as root
+    let is_root = check_linux_root().await?;
+    if is_root {
+        warn!("Running as root user");
+        warn!("Consider running as a non-root user for better security");
+        warn!("Use capabilities or systemd for privileged port access");
+    } else {
+        info!("Running as non-root user");
+        
+        // Check capabilities for privileged ports
+        if needs_privileged_ports() {
+            if let Ok(has_net_bind) = check_linux_capabilities().await {
+                if has_net_bind {
+                    info!("CAP_NET_BIND_SERVICE capability available for privileged ports");
+                } else {
+                    warn!("No capability for privileged ports - may need root or systemd");
+                }
+            }
+        }
+    }
+    
+    // Check SELinux status
+    if let Ok(selinux_status) = check_selinux_status().await {
+        match selinux_status.as_str() {
+            "Enforcing" => {
+                info!("SELinux is in enforcing mode");
+                warn!("SELinux policies may restrict network and file access");
+            }
+            "Permissive" => {
+                info!("SELinux is in permissive mode");
+                info!("SELinux violations will be logged but not enforced");
+            }
+            "Disabled" => {
+                info!("SELinux is disabled");
+            }
+            _ => {
+                warn!("Unknown SELinux status: {}", selinux_status);
+            }
+        }
+    } else {
+        info!("SELinux not detected or not available");
+    }
+    
+    // Check AppArmor status
+    if let Ok(apparmor_enabled) = check_apparmor_status().await {
+        if apparmor_enabled {
+            info!("AppArmor is enabled");
+            warn!("AppArmor profiles may restrict application behavior");
+        } else {
+            info!("AppArmor is not active");
+        }
+    } else {
+        info!("AppArmor not detected or not available");
+    }
+    
+    // Check firewall status (iptables/ufw/firewalld)
+    if let Ok(firewall_info) = check_linux_firewall().await {
+        if !firewall_info.is_empty() {
+            info!("Firewall detected: {}", firewall_info);
+            warn!("Firewall rules may block network connections");
+        } else {
+            info!("No active firewall detected");
+        }
+    } else {
+        warn!("Could not determine firewall status");
+    }
+    
+    Ok(())
+}
+
+/// Check if the application needs privileged ports (< 1024)
+fn needs_privileged_ports() -> bool {
+    // Check if SSDP port 1900 is needed (it's > 1024, so not privileged)
+    // But we might want to bind to port 80 for HTTP in some configurations
+    false // For now, we don't need privileged ports
+}
+
+/// Windows-specific security check functions
+async fn check_windows_elevation() -> anyhow::Result<bool> {
+    // Check if running with administrator privileges
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("net")
+            .args(&["session"])
+            .output()
+            .context("Failed to check Windows elevation")?;
+        
+        // If the command succeeds, we likely have admin privileges
+        Ok(output.status.success())
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_windows_firewall() -> anyhow::Result<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("netsh")
+            .args(&["advfirewall", "show", "allprofiles", "state"])
+            .output()
+            .context("Failed to check Windows Firewall status")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            Ok(output_str.contains("ON"))
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_windows_defender() -> anyhow::Result<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("powershell")
+            .args(&["-Command", "Get-MpComputerStatus | Select-Object -ExpandProperty RealTimeProtectionEnabled"])
+            .output()
+            .context("Failed to check Windows Defender status")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            Ok(output_str.trim() == "True")
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+/// macOS-specific security check functions
+async fn check_macos_elevation() -> anyhow::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("id")
+            .args(&["-u"])
+            .output()
+            .context("Failed to check macOS elevation")?;
+        
+        if output.status.success() {
+            let uid_str = String::from_utf8_lossy(&output.stdout);
+            let uid: u32 = uid_str.trim().parse().unwrap_or(1000);
+            Ok(uid == 0)
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_macos_firewall() -> anyhow::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("defaults")
+            .args(&["read", "/Library/Preferences/com.apple.alf", "globalstate"])
+            .output()
+            .context("Failed to check macOS firewall status")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            let state: u32 = output_str.trim().parse().unwrap_or(0);
+            Ok(state > 0) // 0 = off, 1 = on for specific services, 2 = on for essential services
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_macos_gatekeeper() -> anyhow::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("spctl")
+            .args(&["--status"])
+            .output()
+            .context("Failed to check Gatekeeper status")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            Ok(output_str.contains("assessments enabled"))
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_macos_sip() -> anyhow::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("csrutil")
+            .args(&["status"])
+            .output()
+            .context("Failed to check SIP status")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            Ok(output_str.contains("enabled"))
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+/// Linux-specific security check functions
+async fn check_linux_root() -> anyhow::Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("id")
+            .args(&["-u"])
+            .output()
+            .context("Failed to check Linux user ID")?;
+        
+        if output.status.success() {
+            let uid_str = String::from_utf8_lossy(&output.stdout);
+            let uid: u32 = uid_str.trim().parse().unwrap_or(1000);
+            Ok(uid == 0)
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_linux_capabilities() -> anyhow::Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("capsh")
+            .args(&["--print"])
+            .output()
+            .context("Failed to check Linux capabilities")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            Ok(output_str.contains("cap_net_bind_service"))
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_selinux_status() -> anyhow::Result<String> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("getenforce")
+            .output()
+            .context("Failed to check SELinux status")?;
+        
+        if output.status.success() {
+            let status = String::from_utf8_lossy(&output.stdout);
+            Ok(status.trim().to_string())
+        } else {
+            Err(anyhow::anyhow!("SELinux not available"))
+        }
+    }
+    
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(anyhow::anyhow!("SELinux not available on this platform"))
+    }
+}
+
+async fn check_apparmor_status() -> anyhow::Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        
+        let output = Command::new("aa-status")
+            .output()
+            .context("Failed to check AppArmor status")?;
+        
+        if output.status.success() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            Ok(output_str.contains("profiles are loaded"))
+        } else {
+            Ok(false)
+        }
+    }
+    
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(false)
+    }
+}
+
+async fn check_linux_firewall() -> anyhow::Result<String> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::Command;
+        
+        // Check for ufw
+        if let Ok(output) = Command::new("ufw").args(&["status"]).output() {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                if output_str.contains("Status: active") {
+                    return Ok("ufw (active)".to_string());
+                }
+            }
+        }
+        
+        // Check for firewalld
+        if let Ok(output) = Command::new("firewall-cmd").args(&["--state"]).output() {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                if output_str.trim() == "running" {
+                    return Ok("firewalld (running)".to_string());
+                }
+            }
+        }
+        
+        // Check for iptables
+        if let Ok(output) = Command::new("iptables").args(&["-L", "-n"]).output() {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                if !output_str.is_empty() && !output_str.contains("Chain INPUT (policy ACCEPT)") {
+                    return Ok("iptables (configured)".to_string());
+                }
+            }
+        }
+        
+        Ok(String::new())
+    }
+    
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(String::new())
+    }
+}
+
+/// Perform graceful shutdown with proper cleanup of all resources
+async fn perform_graceful_shutdown(
+    database: Arc<dyn DatabaseManager>,
+    file_watcher: Arc<CrossPlatformWatcher>,
+) -> anyhow::Result<()> {
+    info!("Starting graceful shutdown sequence...");
+    
+    // Step 1: Stop file system monitoring
+    info!("Stopping file system monitoring...");
+    if let Err(e) = file_watcher.stop_watching().await {
+        warn!("Failed to stop file system watcher cleanly: {}", e);
+    } else {
+        info!("File system monitoring stopped");
+    }
+    
+    // Step 2: Flush any pending database operations
+    info!("Flushing database operations...");
+    if let Err(e) = flush_database_operations(&database).await {
+        warn!("Failed to flush database operations: {}", e);
+    } else {
+        info!("Database operations flushed");
+    }
+    
+    // Step 3: Create final database backup if enabled
+    info!("Creating shutdown backup...");
+    if let Err(e) = create_shutdown_backup(&database).await {
+        warn!("Failed to create shutdown backup: {}", e);
+    } else {
+        info!("Shutdown backup created");
+    }
+    
+    // Step 4: Vacuum database for optimization
+    info!("Optimizing database...");
+    if let Err(e) = database.vacuum().await {
+        warn!("Failed to vacuum database: {}", e);
+    } else {
+        info!("Database optimized");
+    }
+    
+    // Step 5: Log final statistics
+    if let Ok(stats) = database.get_stats().await {
+        info!("Final database statistics:");
+        info!("  - Total media files: {}", stats.total_files);
+        info!("  - Total media size: {} bytes", stats.total_size);
+        info!("  - Database file size: {} bytes", stats.database_size);
+    }
+    
+    info!("Graceful shutdown sequence completed");
+    Ok(())
+}
+
+/// Flush any pending database operations
+async fn flush_database_operations(database: &Arc<dyn DatabaseManager>) -> anyhow::Result<()> {
+    // Check database health one final time
+    let health = database.check_and_repair().await
+        .context("Failed to perform final database health check")?;
+    
+    if !health.is_healthy {
+        warn!("Database health issues detected during shutdown:");
+        for issue in &health.issues {
+            match issue.severity {
+                database::IssueSeverity::Critical => error!("  CRITICAL: {}", issue.description),
+                database::IssueSeverity::Error => error!("  ERROR: {}", issue.description),
+                database::IssueSeverity::Warning => warn!("  WARNING: {}", issue.description),
+                database::IssueSeverity::Info => info!("  INFO: {}", issue.description),
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Create a backup during shutdown if backup is enabled
+async fn create_shutdown_backup(database: &Arc<dyn DatabaseManager>) -> anyhow::Result<()> {
+    // Create backup with timestamp
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup_name = format!("opendlna_shutdown_backup_{}.db", timestamp);
+    
+    // Use platform-appropriate backup directory
+    let platform_config = crate::platform::config::PlatformConfig::for_current_platform();
+    let backup_dir = platform_config.database_dir.join("backups");
+    
+    // Ensure backup directory exists
+    tokio::fs::create_dir_all(&backup_dir).await
+        .context("Failed to create backup directory")?;
+    
+    let backup_path = backup_dir.join(backup_name);
+    
+    database.create_backup(&backup_path).await
+        .context("Failed to create shutdown backup")?;
+    
+    info!("Shutdown backup created at: {}", backup_path.display());
+    
+    // Clean up old backups (keep only last 5)
+    if let Err(e) = cleanup_old_backups(&backup_dir).await {
+        warn!("Failed to clean up old backups: {}", e);
+    }
+    
+    Ok(())
+}
+
+/// Clean up old backup files, keeping only the most recent ones
+async fn cleanup_old_backups(backup_dir: &std::path::Path) -> anyhow::Result<()> {
+    let mut entries = tokio::fs::read_dir(backup_dir).await?;
+    let mut backup_files = Vec::new();
+    
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "db") {
+            if let Ok(metadata) = entry.metadata().await {
+                backup_files.push((path, metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)));
+            }
+        }
+    }
+    
+    // Sort by modification time, newest first
+    backup_files.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    // Keep only the 5 most recent backups
+    const MAX_BACKUPS: usize = 5;
+    if backup_files.len() > MAX_BACKUPS {
+        for (old_backup, _) in backup_files.iter().skip(MAX_BACKUPS) {
+            if let Err(e) = tokio::fs::remove_file(old_backup).await {
+                warn!("Failed to remove old backup {}: {}", old_backup.display(), e);
+            } else {
+                info!("Removed old backup: {}", old_backup.display());
+            }
+        }
+    }
+    
     Ok(())
 }

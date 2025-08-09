@@ -1,0 +1,21 @@
+pub mod config;
+pub mod database;
+pub mod error;
+pub mod logging;
+pub mod media;
+pub mod platform;
+pub mod ssdp;
+pub mod watcher;
+pub mod web;
+
+pub mod state {
+    use crate::{config::AppConfig, database::MediaFile};
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    #[derive(Clone)]
+    pub struct AppState {
+        pub config: Arc<AppConfig>,
+        pub media_files: Arc<RwLock<Vec<MediaFile>>>,
+    }
+}

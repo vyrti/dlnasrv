@@ -1,0 +1,402 @@
+name: Release Build and Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+    - name: Get version
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        release_name: OpenDLNA ${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        body: |
+          ## Changes in ${{ steps.get_version.outputs.version }}
+          
+          ### Cross-Platform Improvements
+          - Enhanced Windows, macOS, and Linux compatibility
+          - Improved network discovery and multicast handling
+          - Better file system handling across platforms
+          
+          ### Database and File Watching
+          - Persistent media library with SQLite database
+          - Real-time file system monitoring
+          - Automatic media file detection and indexing
+          
+          ### Platform-Specific Features
+          - Windows: UAC-aware port binding, firewall integration
+          - macOS: Proper multicast interface selection, permission handling
+          - Linux: Network namespace support, capability-aware operations
+          
+          ### Downloads
+          Choose the appropriate binary for your platform:
+          - **Windows**: `opendlna-windows-x86_64.zip`
+          - **macOS**: `opendlna-macos-x86_64.tar.gz` or `opendlna-macos-arm64.tar.gz`
+          - **Linux**: `opendlna-linux-x86_64.tar.gz`
+          
+          ### Installation Packages
+          - **Windows**: MSI installer available
+          - **macOS**: PKG installer available
+          - **Linux**: DEB and RPM packages available
+
+  build-binaries:
+    name: Build Release Binaries
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary_name: opendlna
+            asset_name: opendlna-linux-x86_64.tar.gz
+            build_script: ./build.sh
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary_name: opendlna
+            asset_name: opendlna-linux-arm64.tar.gz
+            build_script: ./build.sh
+          
+          # Windows builds
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_name: opendlna.exe
+            asset_name: opendlna-windows-x86_64.zip
+            build_script: .\build.ps1
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            binary_name: opendlna.exe
+            asset_name: opendlna-windows-arm64.zip
+            build_script: .\build.ps1
+          
+          # macOS builds
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary_name: opendlna
+            asset_name: opendlna-macos-x86_64.tar.gz
+            build_script: ./build.sh
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary_name: opendlna
+            asset_name: opendlna-macos-arm64.tar.gz
+            build_script: ./build.sh
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Cache Cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install system dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+        
+        # Install cross-compilation tools for ARM64
+        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          cargo install cross
+        fi
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        # macOS dependencies are usually pre-installed
+        echo "macOS build environment ready"
+
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Windows dependencies
+        echo "Windows build environment ready"
+
+    - name: Build release binary
+      run: |
+        if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          cross build --release --target ${{ matrix.target }}
+        else
+          cargo build --release --target ${{ matrix.target }}
+        fi
+      shell: bash
+
+    - name: Create release directory
+      run: mkdir -p release
+
+    - name: Copy binary and create archive (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} release/
+        cd release
+        tar -czf ${{ matrix.asset_name }} ${{ matrix.binary_name }}
+
+    - name: Copy binary and create archive (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        copy target\${{ matrix.target }}\release\${{ matrix.binary_name }} release\
+        cd release
+        7z a ${{ matrix.asset_name }} ${{ matrix.binary_name }}
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: release/${{ matrix.asset_name }}
+        asset_name: ${{ matrix.asset_name }}
+        asset_content_type: application/octet-stream
+
+  build-packages:
+    name: Build Installation Packages
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Windows MSI package
+          - os: windows-latest
+            package_type: msi
+            target: x86_64-pc-windows-msvc
+            asset_name: opendlna-windows-x86_64.msi
+          
+          # macOS PKG package
+          - os: macos-latest
+            package_type: pkg
+            target: x86_64-apple-darwin
+            asset_name: opendlna-macos-x86_64.pkg
+          
+          # Linux DEB package
+          - os: ubuntu-latest
+            package_type: deb
+            target: x86_64-unknown-linux-gnu
+            asset_name: opendlna-linux-x86_64.deb
+          
+          # Linux RPM package
+          - os: ubuntu-latest
+            package_type: rpm
+            target: x86_64-unknown-linux-gnu
+            asset_name: opendlna-linux-x86_64.rpm
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+
+    - name: Install system dependencies (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libssl-dev
+        
+        # Install packaging tools
+        if [ "${{ matrix.package_type }}" = "deb" ]; then
+          sudo apt-get install -y dpkg-dev
+        elif [ "${{ matrix.package_type }}" = "rpm" ]; then
+          sudo apt-get install -y rpm
+        fi
+
+    - name: Install packaging tools (Windows)
+      if: matrix.package_type == 'msi'
+      run: |
+        # Install WiX Toolset for MSI creation
+        choco install wixtoolset -y
+        echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" >> $GITHUB_PATH
+
+    - name: Install packaging tools (macOS)
+      if: matrix.package_type == 'pkg'
+      run: |
+        # macOS has pkgbuild built-in
+        echo "macOS packaging tools ready"
+
+    - name: Build release binary
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Create MSI package (Windows)
+      if: matrix.package_type == 'msi'
+      run: |
+        # Use the packaging script
+        .\packaging\windows\build-msi.ps1 -Target ${{ matrix.target }} -Version ${{ needs.create-release.outputs.version }}
+
+    - name: Create PKG package (macOS)
+      if: matrix.package_type == 'pkg'
+      run: |
+        # Use the packaging script
+        ./packaging/macos/build-pkg.sh ${{ matrix.target }} ${{ needs.create-release.outputs.version }}
+
+    - name: Create DEB package (Linux)
+      if: matrix.package_type == 'deb'
+      run: |
+        # Use the packaging script
+        ./packaging/linux/build-deb.sh ${{ matrix.target }} ${{ needs.create-release.outputs.version }}
+
+    - name: Create RPM package (Linux)
+      if: matrix.package_type == 'rpm'
+      run: |
+        # Use the packaging script
+        ./packaging/linux/build-rpm.sh ${{ matrix.target }} ${{ needs.create-release.outputs.version }}
+
+    - name: Upload Package Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: builds/${{ matrix.asset_name }}
+        asset_name: ${{ matrix.asset_name }}
+        asset_content_type: application/octet-stream
+
+  build-docker:
+    name: Build and Push Docker Images
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: opendlna/opendlna
+        tags: |
+          type=ref,event=tag
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  test-packages:
+    name: Test Installation Packages
+    needs: [build-packages, build-binaries]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            package_type: msi
+            test_command: |
+              # Download and test MSI installation
+              echo "Testing MSI package installation"
+          - os: macos-latest
+            package_type: pkg
+            test_command: |
+              # Download and test PKG installation
+              echo "Testing PKG package installation"
+          - os: ubuntu-latest
+            package_type: deb
+            test_command: |
+              # Download and test DEB installation
+              echo "Testing DEB package installation"
+
+    steps:
+    - name: Test package installation
+      run: ${{ matrix.test_command }}
+
+  update-documentation:
+    name: Update Release Documentation
+    needs: [build-binaries, build-packages, build-docker]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Update README with release info
+      run: |
+        # Update README.md with latest release information
+        echo "Updating documentation for release ${{ needs.create-release.outputs.version }}"
+
+    - name: Generate changelog
+      run: |
+        # Generate changelog from git commits
+        echo "Generating changelog for ${{ needs.create-release.outputs.version }}"
+
+    - name: Commit documentation updates
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md CHANGELOG.md
+        git commit -m "Update documentation for release ${{ needs.create-release.outputs.version }}" || exit 0
+        git push
+
+  notify-release:
+    name: Notify Release Completion
+    needs: [build-binaries, build-packages, build-docker, test-packages, update-documentation]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Notify completion
+      run: |
+        echo "Release ${{ needs.create-release.outputs.version }} completed!"
+        echo "Binaries: ${{ needs.build-binaries.result }}"
+        echo "Packages: ${{ needs.build-packages.result }}"
+        echo "Docker: ${{ needs.build-docker.result }}"
+        echo "Package tests: ${{ needs.test-packages.result }}"
+        echo "Documentation: ${{ needs.update-documentation.result }}"

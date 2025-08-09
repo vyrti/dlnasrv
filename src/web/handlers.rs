@@ -71,7 +71,7 @@ pub async fn serve_media(
     let media_files = state.media_files.read().await;
     let file_info = media_files
         .iter()
-        .find(|f| f.id == id)
+        .find(|f| f.id == Some(id.parse::<i64>().unwrap_or(-1)))
         .cloned()
         .ok_or(AppError::NotFound)?;
 

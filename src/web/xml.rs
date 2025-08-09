@@ -1,4 +1,4 @@
-use crate::{config::Config, media::MediaFile};
+use crate::{config::AppConfig, database::MediaFile};
 
 /// XML escape helper
 fn xml_escape(s: &str) -> String {
@@ -9,7 +9,7 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-pub fn generate_description_xml(config: &Config) -> String {
+pub fn generate_description_xml(config: &AppConfig) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
@@ -31,8 +31,8 @@ pub fn generate_description_xml(config: &Config) -> String {
         </serviceList>
     </device>
 </root>"#,
-        xml_escape(&config.name),
-        config.uuid
+        xml_escape(&config.server.name),
+        config.server.uuid
     )
 }
 
@@ -71,19 +71,20 @@ pub fn generate_scpd_xml() -> String {
 </scpd>"#.to_string()
 }
 
-pub fn generate_browse_response(files: &[MediaFile], config: &Config) -> String {
+pub fn generate_browse_response(files: &[MediaFile], config: &AppConfig) -> String {
     let mut didl = String::from(r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">"#);
 
     for file in files {
-        let url = format!("http://{}:{}/media/{}", config.host, config.port, file.id);
+        let file_id = file.id.unwrap_or(0);
+        let url = format!("http://{}:{}/media/{}", "127.0.0.1", config.server.port, file_id);
         didl.push_str(&format!(
             r#"<item id="{id}" parentID="0" restricted="1">
                 <dc:title>{title}</dc:title>
                 <upnp:class>object.item.videoItem</upnp:class>
                 <res protocolInfo="http-get:*:{mime}:*" size="{size}">{url}</res>
             </item>"#,
-            id = file.id,
-            title = xml_escape(&file.name),
+            id = file_id,
+            title = xml_escape(&file.filename),
             mime = file.mime_type,
             size = file.size,
             url = xml_escape(&url)

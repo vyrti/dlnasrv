@@ -322,39 +322,36 @@ async fn handle_configuration_changes(
         info!("Media directory configuration changed");
         changes_detected = true;
         
+        let scanner = media::MediaScanner::with_database(database.clone());
+        let mut cache_needs_reload = false;
+
         // Find added directories
-        for new_dir in &new_dirs {
-            if !old_dirs.contains(new_dir) {
-                info!("New media directory added: {}", new_dir);
+        for new_dir_path_str in &new_dirs {
+            if !old_dirs.contains(new_dir_path_str) {
+                info!("New media directory added: {}", new_dir_path_str);
                 
-                // Scan new directory
-                let dir_path = std::path::PathBuf::from(new_dir);
-                if dir_path.exists() && dir_path.is_dir() {
-                    let scanner = match media::MediaScanner::new().await {
-                        Ok(scanner) => scanner,
-                        Err(e) => {
-                            warn!("Failed to create media scanner for directory {}: {}", new_dir, e);
-                            continue;
-                        }
-                    };
-                    match scanner.scan_directory_simple(&dir_path).await {
-                        Ok(files) => {
-                            info!("Found {} media files in new directory: {}", files.len(), new_dir);
-                            
-                            // Add files to database
-                            for file in &files {
-                                if let Err(e) = database.store_media_file(file).await {
-                                    warn!("Failed to store media file: {} - {}", file.path.display(), e);
+                if let Some(dir_config) = new_config.media.directories.iter().find(|d| &d.path == *new_dir_path_str) {
+                    let dir_path = std::path::PathBuf::from(&dir_config.path);
+                    if dir_path.exists() && dir_path.is_dir() {
+                        let scan_result = if dir_config.recursive {
+                            scanner.scan_directory_recursive(&dir_path).await
+                        } else {
+                            scanner.scan_directory(&dir_path).await
+                        };
+
+                        match scan_result {
+                            Ok(result) => {
+                                info!("Scanned new directory {}: {}", dir_config.path, result.summary());
+                                if result.has_changes() {
+                                    cache_needs_reload = true;
                                 }
                             }
-                            
-                            // Add files to in-memory cache
-                            let mut media_files_guard = media_files.write().await;
-                            media_files_guard.extend(files);
+                            Err(e) => {
+                                warn!("Failed to scan new directory {}: {}", dir_config.path, e);
+                            }
                         }
-                        Err(e) => {
-                            warn!("Failed to scan new directory {}: {}", new_dir, e);
-                        }
+                    } else {
+                        warn!("Newly added directory does not exist or is not a directory: {}", dir_path.display());
                     }
                 }
             }
@@ -370,18 +367,25 @@ async fn handle_configuration_changes(
                 let files_to_remove = database.get_files_in_directory(&dir_path).await
                     .unwrap_or_default();
                 
+                if !files_to_remove.is_empty() {
+                    cache_needs_reload = true;
+                }
+
                 for file in &files_to_remove {
                     if let Err(e) = database.remove_media_file(&file.path).await {
                         warn!("Failed to remove media file from database: {} - {}", file.path.display(), e);
                     }
                 }
                 
-                // Remove from in-memory cache
-                let mut media_files_guard = media_files.write().await;
-                media_files_guard.retain(|f| !f.path.starts_with(&dir_path));
-                
                 info!("Removed {} files from removed directory", files_to_remove.len());
             }
+        }
+
+        if cache_needs_reload {
+            info!("Reloading in-memory media cache due to directory changes...");
+            let all_files = database.get_all_media_files().await?;
+            *media_files.write().await = all_files;
+            info!("In-memory cache updated with {} files.", media_files.read().await.len());
         }
     }
     
@@ -696,53 +700,59 @@ async fn initialize_file_watcher(config: &AppConfig, _database: Arc<dyn Database
 /// Perform initial media scan, using database cache when possible
 async fn perform_initial_media_scan(config: &AppConfig, database: &Arc<dyn DatabaseManager>) -> anyhow::Result<Vec<database::MediaFile>> {
     info!("Performing initial media scan...");
-    
+
     if config.media.scan_on_startup {
         info!("Full media scan enabled - scanning all directories");
-        
-        let mut all_media_files = Vec::new();
-        
+
+        let scanner = media::MediaScanner::with_database(database.clone());
+        let mut total_changes = 0;
+        let mut total_files_scanned = 0;
+
         for dir_config in &config.media.directories {
             let dir_path = std::path::PathBuf::from(&dir_config.path);
-            
+
             if !dir_path.exists() {
                 warn!("Media directory does not exist: {}", dir_config.path);
                 continue;
             }
-            
+
             info!("Scanning directory: {}", dir_config.path);
-            
-            // Use the media scanner to find files
-            let scanner = media::MediaScanner::new().await
-                .with_context(|| "Failed to create media scanner")?;
-            let files = scanner.scan_directory_simple(&dir_path).await
-                .with_context(|| format!("Failed to scan directory: {}", dir_config.path))?;
-            
-            info!("Found {} media files in {}", files.len(), dir_config.path);
-            
-            // Store files in database
-            for file in &files {
-                if let Err(e) = database.store_media_file(file).await {
-                    warn!("Failed to store media file in database: {} - {}", file.path.display(), e);
+
+            let scan_result = if dir_config.recursive {
+                scanner.scan_directory_recursive(&dir_path).await
+                    .with_context(|| format!("Failed to recursively scan directory: {}", dir_config.path))?
+            } else {
+                scanner.scan_directory(&dir_path).await
+                    .with_context(|| format!("Failed to scan directory: {}", dir_config.path))?
+            };
+
+            info!("Scan of {} completed: {}", dir_path.display(), scan_result.summary());
+            if !scan_result.errors.is_empty() {
+                // FIX: Iterate over a reference to avoid moving scan_result.errors
+                for err in &scan_result.errors {
+                    warn!("Scan error in {}: {}", err.path.display(), err.error);
                 }
             }
-            
-            all_media_files.extend(files);
+            total_changes += scan_result.total_changes();
+            total_files_scanned += scan_result.total_scanned;
         }
-        
-        info!("Initial media scan completed - found {} total files", all_media_files.len());
+
+        info!("Initial media scan completed - total files scanned: {}, total changes: {}", total_files_scanned, total_changes);
+
+        // After scan, load all media files from the database for the application state
+        let all_media_files = database.get_all_media_files().await
+            .context("Failed to load media files from database after scan")?;
+
+        info!("Loaded {} total media files from database", all_media_files.len());
         Ok(all_media_files)
     } else {
-        info!("Loading media files from database cache");
-        
+        info!("Loading media files from database cache (scan on startup disabled)");
+
         let cached_files = database.get_all_media_files().await
             .context("Failed to load media files from database")?;
-        
+
         info!("Loaded {} media files from database cache", cached_files.len());
-        
-        // TODO: Implement incremental scan to check for changes since last run
-        // This would compare file modification times with database records
-        
+
         Ok(cached_files)
     }
 }

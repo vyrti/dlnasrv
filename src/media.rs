@@ -1,8 +1,10 @@
+// src/media.rs
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+use tracing::warn;
 
 use crate::database::{DatabaseManager, MediaFile as DbMediaFile};
 use crate::platform::filesystem::{FileSystemManager, MediaFile as FsMediaFile, create_platform_filesystem_manager};
@@ -61,6 +63,37 @@ impl MediaScanner {
             .collect();
         
         Ok(db_files)
+    }
+
+    /// Simple recursive directory scan that returns files without database operations
+    pub async fn scan_directory_recursively_simple(&self, directory: &Path) -> Result<Vec<DbMediaFile>> {
+        let mut all_files = Vec::new();
+        let mut dirs_to_scan = vec![directory.to_path_buf()];
+
+        while let Some(current_dir) = dirs_to_scan.pop() {
+            // Scan current directory for files
+            match self.filesystem_manager.scan_media_directory(&current_dir).await {
+                Ok(fs_files) => {
+                    let db_files: Vec<DbMediaFile> = fs_files
+                        .into_iter()
+                        .map(|fs_file| self.convert_fs_to_db_media_file(fs_file))
+                        .collect();
+                    all_files.extend(db_files);
+                }
+                Err(e) => warn!("Failed to scan directory {}: {}", current_dir.display(), e),
+            }
+
+            // Find subdirectories and add to the queue
+            if let Ok(mut entries) = tokio::fs::read_dir(&current_dir).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        dirs_to_scan.push(path);
+                    }
+                }
+            }
+        }
+        Ok(all_files)
     }
     
     /// Create a media scanner with a custom file system manager (for testing)

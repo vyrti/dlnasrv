@@ -9,6 +9,42 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Get the server's IP address for use in URLs.
+fn get_server_ip(config: &AppConfig) -> String {
+    if config.server.interface != "0.0.0.0" && !config.server.interface.is_empty() {
+        return config.server.interface.clone();
+    }
+
+    // Try to find a non-loopback IP address
+    if let Ok(output) = std::process::Command::new("ip").arg("addr").output() {
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        for line in output_str.lines() {
+            if line.contains("inet ") && !line.contains("127.0.0.1") {
+                if let Some(ip_part) = line.trim().split_whitespace().nth(1) {
+                    if let Some(ip) = ip_part.split('/').next() {
+                        return ip.to_string();
+                    }
+                }
+            }
+        }
+    }
+    
+    "127.0.0.1".to_string() // Fallback
+}
+
+/// Get the appropriate UPnP class for a given MIME type.
+fn get_upnp_class(mime_type: &str) -> &str {
+    if mime_type.starts_with("video/") {
+        "object.item.videoItem"
+    } else if mime_type.starts_with("audio/") {
+        "object.item.audioItem"
+    } else if mime_type.starts_with("image/") {
+        "object.item.imageItem"
+    } else {
+        "object.item" // Generic item
+    }
+}
+
 pub fn generate_description_xml(config: &AppConfig) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -71,24 +107,57 @@ pub fn generate_scpd_xml() -> String {
 </scpd>"#.to_string()
 }
 
-pub fn generate_browse_response(files: &[MediaFile], config: &AppConfig) -> String {
+pub fn generate_browse_response(object_id: &str, files: &[MediaFile], config: &AppConfig) -> String {
+    let server_ip = get_server_ip(config);
     let mut didl = String::from(r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">"#);
+    let mut number_returned = 0;
+    let mut total_matches = 0;
 
-    for file in files {
-        let file_id = file.id.unwrap_or(0);
-        let url = format!("http://{}:{}/media/{}", "127.0.0.1", config.server.port, file_id);
-        didl.push_str(&format!(
-            r#"<item id="{id}" parentID="0" restricted="1">
-                <dc:title>{title}</dc:title>
-                <upnp:class>object.item.videoItem</upnp:class>
-                <res protocolInfo="http-get:*:{mime}:*" size="{size}">{url}</res>
-            </item>"#,
-            id = file_id,
-            title = xml_escape(&file.filename),
-            mime = file.mime_type,
-            size = file.size,
-            url = xml_escape(&url)
-        ));
+    if object_id == "0" {
+        // Root directory: show containers for media types
+        didl.push_str(r#"<container id="video" parentID="0" restricted="1"><dc:title>Video</dc:title><upnp:class>object.container</upnp:class></container>"#);
+        didl.push_str(r#"<container id="audio" parentID="0" restricted="1"><dc:title>Music</dc:title><upnp:class>object.container</upnp:class></container>"#);
+        didl.push_str(r#"<container id="image" parentID="0" restricted="1"><dc:title>Pictures</dc:title><upnp:class>object.container</upnp:class></container>"#);
+        number_returned = 3;
+        total_matches = 3;
+    } else {
+        let (media_type_filter, parent_id) = match object_id {
+            "video" => ("video/", "video"),
+            "audio" => ("audio/", "audio"),
+            "image" => ("image/", "image"),
+            _ => ("", "0"),
+        };
+
+        if !media_type_filter.is_empty() {
+            let filtered_files: Vec<_> = files
+                .iter()
+                .filter(|f| f.mime_type.starts_with(media_type_filter))
+                .collect();
+            
+            number_returned = filtered_files.len();
+            total_matches = filtered_files.len();
+
+            for file in filtered_files {
+                let file_id = file.id.unwrap_or(0);
+                let url = format!("http://{}:{}/media/{}", server_ip, config.server.port, file_id);
+                let upnp_class = get_upnp_class(&file.mime_type);
+
+                didl.push_str(&format!(
+                    r#"<item id="{id}" parentID="{parent_id}" restricted="1">
+                        <dc:title>{title}</dc:title>
+                        <upnp:class>{upnp_class}</upnp:class>
+                        <res protocolInfo="http-get:*:{mime}:*" size="{size}">{url}</res>
+                    </item>"#,
+                    id = file_id,
+                    parent_id = parent_id,
+                    title = xml_escape(&file.filename),
+                    upnp_class = upnp_class,
+                    mime = &file.mime_type,
+                    size = file.size,
+                    url = xml_escape(&url)
+                ));
+            }
+        }
     }
     didl.push_str("</DIDL-Lite>");
 
@@ -105,7 +174,7 @@ pub fn generate_browse_response(files: &[MediaFile], config: &AppConfig) -> Stri
     </s:Body>
 </s:Envelope>"#,
         xml_escape(&didl),
-        files.len(),
-        files.len()
+        number_returned,
+        total_matches
     )
 }

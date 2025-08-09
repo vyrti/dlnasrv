@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio_util::io::ReaderStream;
-use tracing::debug;
+use tracing::{debug, info};
 
 pub async fn root_handler() -> &'static str {
     "OpenDLNA Media Server"
@@ -37,13 +37,25 @@ pub async fn content_directory_scpd() -> impl IntoResponse {
     )
 }
 
+/// Extracts the ObjectID from a SOAP Browse request.
+fn get_object_id(body: &str) -> &str {
+    if let Some(start) = body.find("<ObjectID>") {
+        if let Some(end) = body.find("</ObjectID>") {
+            return &body[start + 10..end];
+        }
+    }
+    "0" // Default to root if not found
+}
+
 pub async fn content_directory_control(
     State(state): State<AppState>,
     body: String,
 ) -> Response {
     if body.contains("<u:Browse") {
+        let object_id = get_object_id(&body);
+        info!("Browse request for ObjectID: {}", object_id);
         let media_files = state.media_files.read().await;
-        let response = generate_browse_response(&media_files, &state.config);
+        let response = generate_browse_response(object_id, &media_files, &state.config);
         (
             StatusCode::OK,
             [

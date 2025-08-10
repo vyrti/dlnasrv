@@ -117,113 +117,9 @@ impl WindowsNetworkManager {
         }
     }
     
-    /// Get network interfaces using Windows-specific methods
+    /// Get network interfaces using the shared platform implementation.
     async fn get_windows_interfaces(&self) -> PlatformResult<Vec<NetworkInterface>> {
-        let mut interfaces = Vec::new();
-        
-        // Use ipconfig to get interface information
-        // In a real implementation, you would use Windows APIs like GetAdaptersAddresses
-        match Command::new("ipconfig").arg("/all").output() {
-            Ok(output) if output.status.success() => {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                interfaces = self.parse_ipconfig_output(&output_str)?;
-            }
-            _ => {
-                warn!("Failed to get network interfaces using ipconfig, using fallback");
-                // Fallback to basic interface
-                interfaces.push(NetworkInterface {
-                    name: "Ethernet".to_string(),
-                    ip_address: "127.0.0.1".parse().unwrap(),
-                    is_loopback: false,
-                    is_up: true,
-                    supports_multicast: true,
-                    interface_type: InterfaceType::Ethernet,
-                });
-            }
-        }
-        
-        Ok(interfaces)
-    }
-    
-    /// Parse ipconfig output to extract network interface information
-    fn parse_ipconfig_output(&self, output: &str) -> PlatformResult<Vec<NetworkInterface>> {
-        let mut interfaces = Vec::new();
-        let mut current_interface: Option<String> = None;
-        let mut current_ip: Option<IpAddr> = None;
-        let mut is_up = false;
-        
-        for line in output.lines() {
-            let line = line.trim();
-            
-            // Detect interface name
-            if line.ends_with(':') && !line.starts_with(' ') {
-                // Save previous interface if we have one
-                if let (Some(name), Some(ip)) = (&current_interface, &current_ip) {
-                    let interface_type = self.determine_windows_interface_type(name);
-                    interfaces.push(NetworkInterface {
-                        name: name.clone(),
-                        ip_address: *ip,
-                        is_loopback: name.contains("Loopback"),
-                        is_up,
-                        supports_multicast: !name.contains("Loopback"),
-                        interface_type,
-                    });
-                }
-                
-                // Start new interface
-                current_interface = Some(line.trim_end_matches(':').to_string());
-                current_ip = None;
-                is_up = false;
-            }
-            
-            // Look for IP address
-            if line.contains("IPv4 Address") || line.contains("IP Address") {
-                if let Some(ip_part) = line.split(':').nth(1) {
-                    let ip_str = ip_part.trim().trim_end_matches("(Preferred)");
-                    if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                        current_ip = Some(ip);
-                        is_up = true; // If it has an IP, assume it's up
-                    }
-                }
-            }
-            
-            // Check for media state
-            if line.contains("Media State") && line.contains("disconnected") {
-                is_up = false;
-            }
-        }
-        
-        // Don't forget the last interface
-        if let (Some(name), Some(ip)) = (current_interface, current_ip) {
-            let interface_type = self.determine_windows_interface_type(&name);
-            interfaces.push(NetworkInterface {
-                name,
-                ip_address: ip,
-                is_loopback: false,
-                is_up,
-                supports_multicast: true,
-                interface_type,
-            });
-        }
-        
-        Ok(interfaces)
-    }
-    
-    /// Determine interface type based on Windows interface name
-    fn determine_windows_interface_type(&self, name: &str) -> InterfaceType {
-        let name_lower = name.to_lowercase();
-        
-        if name_lower.contains("ethernet") || name_lower.contains("local area connection") {
-            InterfaceType::Ethernet
-        } else if name_lower.contains("wi-fi") || name_lower.contains("wireless") || name_lower.contains("wlan") {
-            InterfaceType::WiFi
-        } else if name_lower.contains("vpn") || name_lower.contains("tap") || name_lower.contains("tun") {
-            InterfaceType::VPN
-        } else if name_lower.contains("loopback") {
-            InterfaceType::Loopback
-        } else {
-            InterfaceType::Other(name.to_string())
-        }
+        crate::platform::windows::detect_network_interfaces().await
     }
     
     /// Enable multicast on Windows socket with proper error handling
@@ -541,32 +437,7 @@ mod tests {
         assert!(!manager.requires_elevation(8080));
         assert!(!manager.requires_elevation(9090));
     }
-    
-    #[test]
-    fn test_interface_type_determination() {
-        let manager = WindowsNetworkManager::new();
         
-        assert_eq!(
-            manager.determine_windows_interface_type("Ethernet"),
-            InterfaceType::Ethernet
-        );
-        
-        assert_eq!(
-            manager.determine_windows_interface_type("Wi-Fi"),
-            InterfaceType::WiFi
-        );
-        
-        assert_eq!(
-            manager.determine_windows_interface_type("VPN Connection"),
-            InterfaceType::VPN
-        );
-        
-        assert_eq!(
-            manager.determine_windows_interface_type("Loopback Pseudo-Interface"),
-            InterfaceType::Loopback
-        );
-    }
-    
     #[tokio::test]
     async fn test_port_availability_check() {
         let manager = WindowsNetworkManager::new();
@@ -575,41 +446,5 @@ mod tests {
         let available = manager.is_port_available(8080).await;
         // This might fail in test environment, but we can at least verify the method works
         println!("Port 8080 available: {}", available);
-    }
-    
-    #[test]
-    fn test_ipconfig_parsing() {
-        let manager = WindowsNetworkManager::new();
-        
-        let sample_output = r#"
-Windows IP Configuration
-
-Ethernet adapter Ethernet:
-
-   Connection-specific DNS Suffix  . : 
-   IPv4 Address. . . . . . . . . . . : 192.168.1.100
-   Subnet Mask . . . . . . . . . . . : 255.255.255.0
-   Default Gateway . . . . . . . . . : 192.168.1.1
-
-Wireless LAN adapter Wi-Fi:
-
-   Connection-specific DNS Suffix  . : 
-   IPv4 Address. . . . . . . . . . . : 192.168.1.101
-   Subnet Mask . . . . . . . . . . . : 255.255.255.0
-   Default Gateway . . . . . . . . . : 192.168.1.1
-"#;
-        
-        let interfaces = manager.parse_ipconfig_output(sample_output).unwrap();
-        assert_eq!(interfaces.len(), 2);
-        
-        let ethernet = &interfaces[0];
-        assert_eq!(ethernet.name, "Ethernet adapter Ethernet");
-        assert_eq!(ethernet.ip_address, "192.168.1.100".parse::<IpAddr>().unwrap());
-        assert_eq!(ethernet.interface_type, InterfaceType::Ethernet);
-        
-        let wifi = &interfaces[1];
-        assert_eq!(wifi.name, "Wireless LAN adapter Wi-Fi");
-        assert_eq!(wifi.ip_address, "192.168.1.101".parse::<IpAddr>().unwrap());
-        assert_eq!(wifi.interface_type, InterfaceType::WiFi);
     }
 }

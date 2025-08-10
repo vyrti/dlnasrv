@@ -561,31 +561,54 @@ async fn detect_platform_with_diagnostics() -> anyhow::Result<PlatformInfo> {
 async fn initialize_configuration(_platform_info: &PlatformInfo) -> anyhow::Result<AppConfig> {
     info!("Initializing configuration...");
     
-    // Try to load configuration from platform-appropriate location
     let config_path = AppConfig::get_platform_config_file_path();
     info!("Configuration file path: {}", config_path.display());
     
+    // First, try to load from command line arguments
+    match AppConfig::from_args().await {
+        Ok(config) => {
+            info!("Using configuration from command line arguments");
+            
+            // Apply platform-specific defaults for any missing values
+            let mut config = config;
+            config.apply_platform_defaults()
+                .context("Failed to apply platform-specific defaults to command line configuration")?;
+            
+            // Validate the final configuration
+            config.validate_for_platform()
+                .context("Command line configuration validation failed")?;
+            
+            info!("Command line configuration validated successfully");
+            info!("Server will listen on: {}:{}", config.server.interface, config.server.port);
+            info!("SSDP will use port: {}", config.network.ssdp_port);
+            info!("Monitoring {} director(ies) for media files", config.media.directories.len());
+            
+            for (i, dir) in config.media.directories.iter().enumerate() {
+                info!("  {}. {} (recursive: {})", i + 1, dir.path, dir.recursive);
+            }
+            
+            return Ok(config);
+        }
+        Err(e) => {
+            info!("No valid command line arguments provided: {}", e);
+            info!("Falling back to configuration file or platform defaults");
+        }
+    }
+    
+    // Fall back to configuration file or defaults
     let mut config = if config_path.exists() {
         info!("Loading existing configuration from: {}", config_path.display());
         AppConfig::load_from_file(&config_path)
             .context("Failed to load configuration file")?
     } else {
         info!("Creating new configuration with platform defaults");
-        // Check if we have command line arguments to override defaults
-        match AppConfig::from_args().await {
-            Ok(config) => config,
-            Err(_) => {
-                // No command line args, use pure platform defaults
-                AppConfig::default_for_platform()
-            }
-        }
+        AppConfig::default_for_platform()
     };
     
     // Apply platform-specific defaults and validation
     config.apply_platform_defaults()
         .context("Failed to apply platform-specific defaults")?;
     
-    // Validate configuration for current platform
     config.validate_for_platform()
         .context("Configuration validation failed")?;
     

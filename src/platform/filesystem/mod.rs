@@ -47,6 +47,31 @@ pub enum FileSystemError {
     #[error("Invalid path: {path} - {reason}")]
     InvalidPath { path: String, reason: String },
     
+    #[error("Path contains invalid Windows character '{character}': {path} - {reason}")]
+    InvalidWindowsCharacter {
+        path: String,
+        character: char,
+        reason: String,
+    },
+    
+    #[error("Invalid colon usage in Windows path: {path} - {details}")]
+    InvalidColonUsage {
+        path: String,
+        details: String,
+    },
+    
+    #[error("Path exceeds maximum length: {path} - {details}")]
+    PathTooLong {
+        path: String,
+        details: String,
+    },
+    
+    #[error("Path contains reserved name: {path} - {reserved_name}")]
+    ReservedName {
+        path: String,
+        reserved_name: String,
+    },
+    
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     
@@ -58,6 +83,194 @@ pub enum FileSystemError {
     
     #[error("Platform-specific error: {0}")]
     Platform(String),
+}
+
+impl FileSystemError {
+    /// Get a user-friendly error message with detailed explanation
+    pub fn user_message(&self) -> String {
+        match self {
+            FileSystemError::PathNotFound { path } => {
+                format!(
+                    "Path not found: {}\n\nWhat this means: The specified file or directory does not exist.\nSuggestion: Verify the path is correct and the file/directory exists.",
+                    path
+                )
+            }
+            FileSystemError::AccessDenied { path, reason } => {
+                format!(
+                    "Access denied: {}\nReason: {}\n\nWhat this means: You don't have permission to access this location.\nSuggestion: Check file permissions or run with appropriate privileges.",
+                    path, reason
+                )
+            }
+            FileSystemError::InvalidPath { path, reason } => {
+                format!(
+                    "Invalid path: {}\nReason: {}\n\nWhat this means: The path format is not valid for this system.\nSuggestion: Use a valid path format for your operating system.",
+                    path, reason
+                )
+            }
+            FileSystemError::InvalidWindowsCharacter { path, character, reason } => {
+                format!(
+                    "Invalid Windows path character '{}': {}\nReason: {}\n\nWhat this means: Windows paths cannot contain certain special characters.\nSuggestion: Remove or replace the invalid character '{}' from your path.",
+                    character, path, reason, character
+                )
+            }
+            FileSystemError::InvalidColonUsage { path, details } => {
+                format!(
+                    "Invalid colon usage in Windows path: {}\nDetails: {}\n\nWhat this means: Colons (:) are only allowed in specific positions in Windows paths.\nValid examples:\n  - Drive letters: C:\\Users\\Documents\n  - UNC network paths: \\\\server:port\\share\nSuggestion: Check that colons are only used in drive letters or network addresses.",
+                    path, details
+                )
+            }
+            FileSystemError::PathTooLong { path, details } => {
+                format!(
+                    "Path too long: {}\nDetails: {}\n\nWhat this means: The path exceeds the maximum length allowed by Windows.\nSuggestion: Use a shorter path or enable long path support in Windows.",
+                    path, details
+                )
+            }
+            FileSystemError::ReservedName { path, reserved_name } => {
+                format!(
+                    "Reserved name in path: {}\nReserved name: {}\n\nWhat this means: Windows reserves certain names that cannot be used as file or directory names.\nReserved names include: CON, PRN, AUX, NUL, COM1-9, LPT1-9\nSuggestion: Choose a different name that is not reserved by Windows.",
+                    path, reserved_name
+                )
+            }
+            FileSystemError::Io(err) => {
+                format!(
+                    "System I/O error: {}\n\nWhat this means: A low-level system operation failed.\nSuggestion: Check disk space, file permissions, and system resources.",
+                    err
+                )
+            }
+            FileSystemError::Permission { path, details } => {
+                format!(
+                    "Permission error: {}\nDetails: {}\n\nWhat this means: The application doesn't have the required permissions.\nSuggestion: Check file/directory permissions or run with elevated privileges.",
+                    path, details
+                )
+            }
+            FileSystemError::Encoding { path, details } => {
+                format!(
+                    "Text encoding error: {}\nDetails: {}\n\nWhat this means: The path contains characters that cannot be properly encoded.\nSuggestion: Use standard ASCII characters in file paths when possible.",
+                    path, details
+                )
+            }
+            FileSystemError::Platform(msg) => {
+                format!(
+                    "Platform-specific error: {}\n\nWhat this means: A system-specific operation failed.\nSuggestion: Check system logs and ensure the operation is supported on your platform.",
+                    msg
+                )
+            }
+        }
+    }
+    
+    /// Get recovery suggestions for the error
+    pub fn recovery_suggestions(&self) -> Vec<String> {
+        match self {
+            FileSystemError::PathNotFound { .. } => vec![
+                "Verify the path exists".to_string(),
+                "Check for typos in the path".to_string(),
+                "Create the missing directory if needed".to_string(),
+                "Use an absolute path instead of relative".to_string(),
+            ],
+            FileSystemError::AccessDenied { .. } => vec![
+                "Check file/directory permissions".to_string(),
+                "Run the application with administrator privileges".to_string(),
+                "Ensure the file is not locked by another application".to_string(),
+                "Verify you have read/write access to the parent directory".to_string(),
+            ],
+            FileSystemError::InvalidPath { .. } => vec![
+                "Use forward slashes (/) or double backslashes (\\\\) in paths".to_string(),
+                "Avoid special characters in file names".to_string(),
+                "Use absolute paths when possible".to_string(),
+                "Check path format for your operating system".to_string(),
+            ],
+            FileSystemError::InvalidWindowsCharacter { character, .. } => vec![
+                format!("Remove the '{}' character from the path", character),
+                format!("Replace '{}' with an underscore or dash", character),
+                "Use only alphanumeric characters and standard separators".to_string(),
+                "Avoid these characters in Windows paths: < > : \" | ? *".to_string(),
+            ],
+            FileSystemError::InvalidColonUsage { .. } => vec![
+                "Use colons only in drive letters (C:, D:, etc.)".to_string(),
+                "For network paths, use \\\\server:port\\share format".to_string(),
+                "Remove colons from file and directory names".to_string(),
+                "Use underscores or dashes instead of colons in names".to_string(),
+            ],
+            FileSystemError::PathTooLong { .. } => vec![
+                "Use shorter file and directory names".to_string(),
+                "Move files to a location with a shorter path".to_string(),
+                "Enable long path support in Windows 10/11".to_string(),
+                "Use the \\\\?\\ prefix for very long paths".to_string(),
+            ],
+            FileSystemError::ReservedName { reserved_name, .. } => vec![
+                format!("Rename '{}' to something else", reserved_name),
+                "Add a suffix or prefix to make the name unique".to_string(),
+                "Avoid these reserved names: CON, PRN, AUX, NUL, COM1-9, LPT1-9".to_string(),
+                "Use descriptive names that don't conflict with system names".to_string(),
+            ],
+            FileSystemError::Io(_) => vec![
+                "Check available disk space".to_string(),
+                "Verify file permissions".to_string(),
+                "Close other applications that might be using the file".to_string(),
+                "Restart the application and try again".to_string(),
+            ],
+            FileSystemError::Permission { .. } => vec![
+                "Run as administrator or with elevated privileges".to_string(),
+                "Check and modify file/directory permissions".to_string(),
+                "Ensure the file is not read-only".to_string(),
+                "Verify you own the file or have appropriate access".to_string(),
+            ],
+            FileSystemError::Encoding { .. } => vec![
+                "Use standard ASCII characters in paths".to_string(),
+                "Avoid special Unicode characters in file names".to_string(),
+                "Rename files with problematic characters".to_string(),
+                "Check system locale and encoding settings".to_string(),
+            ],
+            FileSystemError::Platform(_) => vec![
+                "Check system documentation for platform-specific requirements".to_string(),
+                "Verify the operation is supported on your system".to_string(),
+                "Update your operating system if needed".to_string(),
+                "Contact support with system details".to_string(),
+            ],
+        }
+    }
+    
+    /// Check if the error is recoverable
+    pub fn is_recoverable(&self) -> bool {
+        match self {
+            FileSystemError::PathNotFound { .. } => true,  // Path might be created
+            FileSystemError::AccessDenied { .. } => true,  // Permissions might be fixed
+            FileSystemError::InvalidPath { .. } => false, // Path format is fundamentally wrong
+            FileSystemError::InvalidWindowsCharacter { .. } => false, // Character is invalid
+            FileSystemError::InvalidColonUsage { .. } => false, // Colon usage is invalid
+            FileSystemError::PathTooLong { .. } => true,  // Path might be shortened
+            FileSystemError::ReservedName { .. } => false, // Name is reserved
+            FileSystemError::Io(_) => true,               // I/O issues might be temporary
+            FileSystemError::Permission { .. } => true,   // Permissions might be fixed
+            FileSystemError::Encoding { .. } => false,    // Encoding issues are fundamental
+            FileSystemError::Platform(_) => false,        // Platform issues are usually permanent
+        }
+    }
+    
+    /// Get the severity level of the error
+    pub fn severity(&self) -> ErrorSeverity {
+        match self {
+            FileSystemError::PathNotFound { .. } => ErrorSeverity::Warning,
+            FileSystemError::AccessDenied { .. } => ErrorSeverity::Error,
+            FileSystemError::InvalidPath { .. } => ErrorSeverity::Error,
+            FileSystemError::InvalidWindowsCharacter { .. } => ErrorSeverity::Error,
+            FileSystemError::InvalidColonUsage { .. } => ErrorSeverity::Error,
+            FileSystemError::PathTooLong { .. } => ErrorSeverity::Warning,
+            FileSystemError::ReservedName { .. } => ErrorSeverity::Error,
+            FileSystemError::Io(_) => ErrorSeverity::Error,
+            FileSystemError::Permission { .. } => ErrorSeverity::Error,
+            FileSystemError::Encoding { .. } => ErrorSeverity::Warning,
+            FileSystemError::Platform(_) => ErrorSeverity::Critical,
+        }
+    }
+}
+
+/// Error severity levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorSeverity {
+    Warning,
+    Error,
+    Critical,
 }
 
 /// Detailed file information

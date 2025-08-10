@@ -62,13 +62,25 @@ impl WindowsFileSystemManager {
         
         let path_str = path.to_string_lossy();
         
-        // Check for invalid Windows characters
-        let invalid_chars = ['<', '>', ':', '"', '|', '?', '*'];
+        // Check for invalid Windows characters (excluding colon which is handled separately)
+        let invalid_chars = ['<', '>', '"', '|', '?', '*'];
         for &invalid_char in &invalid_chars {
-            if path_str.contains(invalid_char) && !self.is_unc_path(path) && !self.has_drive_letter(path) {
-                return Err(FileSystemError::InvalidPath {
+            if path_str.contains(invalid_char) {
+                return Err(FileSystemError::InvalidWindowsCharacter {
                     path: path.display().to_string(),
-                    reason: format!("Path contains invalid Windows character: {}", invalid_char),
+                    character: invalid_char,
+                    reason: format!("Windows paths cannot contain the '{}' character. This character is reserved by the Windows file system.", invalid_char),
+                });
+            }
+        }
+        
+        // Handle colon validation separately with proper logic
+        if path_str.contains(':') {
+            if !self.is_valid_colon_usage(path) {
+                let colon_details = self.get_colon_validation_details(path);
+                return Err(FileSystemError::InvalidColonUsage {
+                    path: path.display().to_string(),
+                    details: colon_details,
                 });
             }
         }
@@ -85,18 +97,18 @@ impl WindowsFileSystemManager {
             let name_without_ext = filename_upper.split('.').next().unwrap_or(&filename_upper);
             
             if reserved_names.contains(&name_without_ext) {
-                return Err(FileSystemError::InvalidPath {
+                return Err(FileSystemError::ReservedName {
                     path: path.display().to_string(),
-                    reason: format!("Path contains reserved Windows name: {}", name_without_ext),
+                    reserved_name: name_without_ext.to_string(),
                 });
             }
         }
         
         // Check path length limits
         if path_str.len() > 260 && !path_str.starts_with(r"\\?\") {
-            return Err(FileSystemError::InvalidPath {
+            return Err(FileSystemError::PathTooLong {
                 path: path.display().to_string(),
-                reason: "Path exceeds Windows MAX_PATH limit (260 characters)".to_string(),
+                details: format!("Path length is {} characters, which exceeds the Windows MAX_PATH limit of 260 characters. Consider using shorter names or enabling long path support.", path_str.len()),
             });
         }
         
@@ -152,6 +164,123 @@ impl WindowsFileSystemManager {
         // In a full implementation, we would use Windows APIs to find the actual case
         // For now, we'll just return the path as-is since Windows is case-insensitive
         Some(path.to_path_buf())
+    }
+    
+    /// Check if colon usage in the path is valid for Windows
+    fn is_valid_colon_usage(&self, path: &Path) -> bool {
+        let path_str = path.to_string_lossy();
+        
+        // UNC paths can have colons in network addresses (\\server:port\share)
+        if self.is_unc_path(path) {
+            return self.validate_unc_colon_usage(&path_str);
+        }
+        
+        // Drive letter paths should only have colon at position 1
+        if self.has_drive_letter(path) || self.looks_like_drive_letter(&path_str) {
+            return self.validate_drive_letter_colon_usage(&path_str);
+        }
+        
+        // Relative paths should not contain colons
+        !path_str.contains(':')
+    }
+    
+    /// Check if a path string looks like it starts with a drive letter (more flexible than has_drive_letter)
+    fn looks_like_drive_letter(&self, path_str: &str) -> bool {
+        path_str.len() >= 2 && 
+        path_str.chars().nth(1) == Some(':') &&
+        path_str.chars().nth(0).map(|c| c.is_ascii_alphabetic()).unwrap_or(false)
+    }
+    
+    /// Validate colon usage in drive letter paths
+    fn validate_drive_letter_colon_usage(&self, path_str: &str) -> bool {
+        // Find all colon positions
+        let colon_positions: Vec<usize> = path_str.match_indices(':').map(|(i, _)| i).collect();
+        
+        // Should only have one colon at position 1 (after drive letter)
+        colon_positions.len() == 1 && colon_positions[0] == 1
+    }
+    
+    /// Validate colon usage in UNC paths
+    fn validate_unc_colon_usage(&self, path_str: &str) -> bool {
+        // UNC paths: \\server:port\share or \\server\share
+        // Colons are allowed in the server:port portion
+        if !path_str.starts_with(r"\\") {
+            return false;
+        }
+        
+        // Split into components: ["", "", "server:port", "share", ...]
+        let components: Vec<&str> = path_str.split('\\').collect();
+        if components.len() < 4 {
+            return false; // Invalid UNC path structure
+        }
+        
+        // Check if colons only appear in the server component (index 2)
+        for (i, component) in components.iter().enumerate() {
+            if component.contains(':') && i != 2 {
+                return false; // Colon in wrong position
+            }
+        }
+        
+        true
+    }
+    
+    /// Get detailed information about why colon validation failed
+    fn get_colon_validation_details(&self, path: &Path) -> String {
+        let path_str = path.to_string_lossy();
+        let colon_positions: Vec<usize> = path_str.match_indices(':').map(|(i, _)| i).collect();
+        
+        if colon_positions.is_empty() {
+            return "No colons found in path".to_string();
+        }
+        
+        let mut details = Vec::new();
+        
+        // Check if it's a UNC path
+        if path_str.starts_with(r"\\") {
+            details.push("Detected UNC network path format".to_string());
+            
+            let components: Vec<&str> = path_str.split('\\').collect();
+            if components.len() < 4 {
+                details.push("Invalid UNC path structure - should be \\\\server\\share or \\\\server:port\\share".to_string());
+            } else {
+                for (i, component) in components.iter().enumerate() {
+                    if component.contains(':') {
+                        if i == 2 {
+                            details.push(format!("Valid colon usage in server component: '{}'", component));
+                        } else {
+                            details.push(format!("Invalid colon in component {} ('{}'): colons only allowed in server component", i, component));
+                        }
+                    }
+                }
+            }
+        }
+        // Check if it looks like a drive letter path
+        else if self.looks_like_drive_letter(&path_str) {
+            details.push("Detected drive letter path format".to_string());
+            
+            if colon_positions.len() == 1 && colon_positions[0] == 1 {
+                details.push("Valid drive letter colon usage".to_string());
+            } else if colon_positions.len() > 1 {
+                details.push(format!("Multiple colons found at positions: {:?} - only one colon allowed at position 1", colon_positions));
+            } else if colon_positions[0] != 1 {
+                details.push(format!("Colon at wrong position {} - drive letter colon must be at position 1", colon_positions[0]));
+            }
+        }
+        // Relative path or other format
+        else {
+            details.push("Relative or non-standard path format".to_string());
+            details.push(format!("Found colons at positions: {:?} - colons not allowed in relative paths", colon_positions));
+            details.push("Suggestion: Remove colons from file/directory names or use absolute paths with proper drive letters".to_string());
+        }
+        
+        // Add examples of valid usage
+        if details.iter().any(|d| d.contains("Invalid") || d.contains("not allowed")) {
+            details.push("Valid colon usage examples:".to_string());
+            details.push("  - Drive letters: C:\\Users\\Documents, D:\\Media".to_string());
+            details.push("  - UNC paths: \\\\server\\share, \\\\192.168.1.100:8080\\media".to_string());
+        }
+        
+        details.join("\n")
     }
 }
 
@@ -377,5 +506,86 @@ mod tests {
         assert!(manager.is_hidden_windows(Path::new(r"C:\path\desktop.ini")));
         assert!(manager.is_hidden_windows(Path::new(r"C:\path\.hidden")));
         assert!(!manager.is_hidden_windows(Path::new(r"C:\path\normal.txt")));
+    }
+    
+    #[test]
+    fn test_valid_drive_letter_paths() {
+        let manager = WindowsFileSystemManager::new();
+        
+        // Valid drive letter paths
+        assert!(manager.validate_windows_path(Path::new(r"C:\Users\Welcome\Videos")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"D:\Media\Movies")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"Z:\")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"C:")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"C:/path/with/forward/slashes")).is_ok());
+    }
+    
+    #[test]
+    fn test_valid_unc_paths() {
+        let manager = WindowsFileSystemManager::new();
+        
+        // Valid UNC paths
+        assert!(manager.validate_windows_path(Path::new(r"\\server\share")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"\\192.168.1.100\media")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"\\server:8080\share")).is_ok());
+        assert!(manager.validate_windows_path(Path::new(r"\\server:443\share\subfolder")).is_ok());
+    }
+    
+    #[test]
+    fn test_invalid_colon_usage() {
+        let manager = WindowsFileSystemManager::new();
+        
+        // Invalid colon usage
+        assert!(manager.validate_windows_path(Path::new(r"C:\path\file:name")).is_err());
+        assert!(manager.validate_windows_path(Path::new(r"relative\path:name")).is_err());
+        assert!(manager.validate_windows_path(Path::new(r"\\server\share:invalid")).is_err());
+        assert!(manager.validate_windows_path(Path::new(r"C:D:\invalid")).is_err());
+        assert!(manager.validate_windows_path(Path::new(r"path:with:multiple:colons")).is_err());
+    }
+    
+    #[test]
+    fn test_colon_validation_details() {
+        let manager = WindowsFileSystemManager::new();
+        
+        // Test drive letter colon validation
+        assert!(manager.validate_drive_letter_colon_usage("C:\\path"));
+        assert!(manager.validate_drive_letter_colon_usage("D:"));
+        assert!(!manager.validate_drive_letter_colon_usage("C:\\path:invalid"));
+        assert!(!manager.validate_drive_letter_colon_usage("C:D:\\invalid"));
+        assert!(!manager.validate_drive_letter_colon_usage("path:invalid"));
+        
+        // Test UNC colon validation
+        assert!(manager.validate_unc_colon_usage(r"\\server:8080\share"));
+        assert!(manager.validate_unc_colon_usage(r"\\server\share"));
+        assert!(manager.validate_unc_colon_usage(r"\\192.168.1.100:443\share\subfolder"));
+        assert!(!manager.validate_unc_colon_usage(r"\\server\share:invalid"));
+        assert!(!manager.validate_unc_colon_usage(r"\\server:8080\share:invalid"));
+        assert!(!manager.validate_unc_colon_usage(r"not\unc\path:invalid"));
+        
+        // Test looks_like_drive_letter helper
+        assert!(manager.looks_like_drive_letter("C:"));
+        assert!(manager.looks_like_drive_letter("C:\\path"));
+        assert!(manager.looks_like_drive_letter("D:/path"));
+        assert!(!manager.looks_like_drive_letter("\\\\server"));
+        assert!(!manager.looks_like_drive_letter("relative"));
+        assert!(!manager.looks_like_drive_letter("1:invalid"));
+    }
+    
+    #[test]
+    fn test_is_valid_colon_usage() {
+        let manager = WindowsFileSystemManager::new();
+        
+        // Valid colon usage
+        assert!(manager.is_valid_colon_usage(Path::new(r"C:\path")));
+        assert!(manager.is_valid_colon_usage(Path::new(r"D:")));
+        assert!(manager.is_valid_colon_usage(Path::new(r"\\server:8080\share")));
+        assert!(manager.is_valid_colon_usage(Path::new(r"\\server\share")));
+        assert!(manager.is_valid_colon_usage(Path::new(r"relative\path\without\colons")));
+        
+        // Invalid colon usage
+        assert!(!manager.is_valid_colon_usage(Path::new(r"C:\path\file:name")));
+        assert!(!manager.is_valid_colon_usage(Path::new(r"relative\path:name")));
+        assert!(!manager.is_valid_colon_usage(Path::new(r"\\server\share:invalid")));
+        assert!(!manager.is_valid_colon_usage(Path::new(r"C:D:\invalid")));
     }
 }

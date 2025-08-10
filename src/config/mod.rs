@@ -100,20 +100,27 @@ impl AppConfig {
         }
         
         let args = Args::parse();
-        let platform_config = PlatformConfig::for_current_platform();
         
-        // Use provided media directory or platform default
-        let media_dir = if let Some(dir) = args.media_dir {
-            PathBuf::from(dir)
-        } else {
-            platform_config.default_media_dir.clone()
-        };
-
+        // If no media directory provided, return error to indicate no args
+        let media_dir_str = args.media_dir.ok_or_else(|| {
+            anyhow::anyhow!("No media directory provided in command line arguments")
+        })?;
+        
+        let media_dir = PathBuf::from(&media_dir_str);
+        
+        tracing::info!("Processing command line arguments with media directory: {}", media_dir.display());
+        
+        // Validate that the directory exists before doing platform validation
+        if !media_dir.exists() {
+            anyhow::bail!("Media directory does not exist: {}", media_dir.display());
+        }
+        
         if !media_dir.is_dir() {
-            anyhow::bail!("Media path is not a valid directory: {}", media_dir.display());
+            anyhow::bail!("Media path is not a directory: {}", media_dir.display());
         }
 
-        // Validate the media directory path for the current platform
+        // Now validate the path for platform compatibility
+        let platform_config = PlatformConfig::for_current_platform();
         platform_config.validate_path(&media_dir)
             .with_context(|| format!("Invalid media directory for current platform: {}", media_dir.display()))?;
 
@@ -132,6 +139,8 @@ impl AppConfig {
                 exclude_patterns: Some(platform_config.get_default_exclude_patterns()),
             }
         ];
+        
+        tracing::info!("Using command line media directory: {}", media_dir.display());
         
         Ok(config)
     }

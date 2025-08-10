@@ -1,4 +1,10 @@
-use crate::{config::AppConfig, database::MediaFile};
+// src\web\xml.rs
+use crate::{database::MediaFile, state::AppState};
+use std::{
+    collections::HashSet,
+    path::{Component, Path, PathBuf},
+};
+use tracing::warn;
 
 /// XML escape helper
 fn xml_escape(s: &str) -> String {
@@ -9,27 +15,31 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Get the server's IP address for use in URLs.
-fn get_server_ip(config: &AppConfig) -> String {
-    if config.server.interface != "0.0.0.0" && !config.server.interface.is_empty() {
-        return config.server.interface.clone();
+/// Get the server's IP address for use in URLs from the application state.
+fn get_server_ip(state: &AppState) -> String {
+    // 1. Use the primary interface detected at startup.
+    if let Some(iface) = state.platform_info.get_primary_interface() {
+        return iface.ip_address.to_string();
     }
 
-    // Try to find a non-loopback IP address
-    if let Ok(output) = std::process::Command::new("ip").arg("addr").output() {
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        for line in output_str.lines() {
-            if line.contains("inet ") && !line.contains("127.0.0.1") {
-                if let Some(ip_part) = line.trim().split_whitespace().nth(1) {
-                    if let Some(ip) = ip_part.split('/').next() {
-                        return ip.to_string();
-                    }
-                }
-            }
-        }
+    // 2. Fallback to the configured server interface if it's not a wildcard.
+    if state.config.server.interface != "0.0.0.0" && !state.config.server.interface.is_empty() {
+        return state.config.server.interface.clone();
     }
-    
-    "127.0.0.1".to_string() // Fallback
+
+    // 3. Fallback to trying to find any usable interface from the list.
+    if let Some(iface) = state
+        .platform_info
+        .network_interfaces
+        .iter()
+        .find(|i| !i.is_loopback && i.is_up)
+    {
+        return iface.ip_address.to_string();
+    }
+
+    // 4. Final fallback.
+    warn!("Could not determine a specific server IP for XML description; falling back to 127.0.0.1.");
+    "127.0.0.1".to_string()
 }
 
 /// Get the appropriate UPnP class for a given MIME type.
@@ -45,7 +55,7 @@ fn get_upnp_class(mime_type: &str) -> &str {
     }
 }
 
-pub fn generate_description_xml(config: &AppConfig) -> String {
+pub fn generate_description_xml(state: &AppState) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
@@ -67,8 +77,8 @@ pub fn generate_description_xml(config: &AppConfig) -> String {
         </serviceList>
     </device>
 </root>"#,
-        xml_escape(&config.server.name),
-        config.server.uuid
+        xml_escape(&state.config.server.name),
+        state.config.server.uuid
     )
 }
 
@@ -107,11 +117,14 @@ pub fn generate_scpd_xml() -> String {
 </scpd>"#.to_string()
 }
 
-pub fn generate_browse_response(object_id: &str, files: &[MediaFile], config: &AppConfig) -> String {
-    let server_ip = get_server_ip(config);
+pub fn generate_browse_response(
+    object_id: &str,
+    files: &[MediaFile],
+    state: &AppState,
+) -> String {
+    let server_ip = get_server_ip(state);
     let mut didl = String::from(r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">"#);
-    let mut number_returned = 0;
-    let mut total_matches = 0;
+    let number_returned;
 
     if object_id == "0" {
         // Root directory: show containers for media types
@@ -119,47 +132,83 @@ pub fn generate_browse_response(object_id: &str, files: &[MediaFile], config: &A
         didl.push_str(r#"<container id="audio" parentID="0" restricted="1"><dc:title>Music</dc:title><upnp:class>object.container</upnp:class></container>"#);
         didl.push_str(r#"<container id="image" parentID="0" restricted="1"><dc:title>Pictures</dc:title><upnp:class>object.container</upnp:class></container>"#);
         number_returned = 3;
-        total_matches = 3;
     } else {
-        let (media_type_filter, parent_id) = match object_id {
-            "video" => ("video/", "video"),
-            "audio" => ("audio/", "audio"),
-            "image" => ("image/", "image"),
-            _ => ("", "0"),
+        let mut sub_containers = HashSet::new();
+        let mut items = Vec::new();
+
+        let (media_type_filter, path_prefix_str) = if object_id.starts_with("video") {
+            ("video/", object_id.strip_prefix("video").unwrap_or("").trim_start_matches('/'))
+        } else if object_id.starts_with("audio") {
+            ("audio/", object_id.strip_prefix("audio").unwrap_or("").trim_start_matches('/'))
+        } else if object_id.starts_with("image") {
+            ("image/", object_id.strip_prefix("image").unwrap_or("").trim_start_matches('/'))
+        } else {
+            ("", "")
         };
+        
+        let media_root = state.config.get_primary_media_dir();
+        // Create a Path from the ObjectID's path part for reliable comparison
+        let browse_path = Path::new(path_prefix_str);
 
-        if !media_type_filter.is_empty() {
-            let filtered_files: Vec<_> = files
-                .iter()
-                .filter(|f| f.mime_type.starts_with(media_type_filter))
-                .collect();
-            
-            number_returned = filtered_files.len();
-            total_matches = filtered_files.len();
-
-            for file in filtered_files {
-                let file_id = file.id.unwrap_or(0);
-                let url = format!("http://{}:{}/media/{}", server_ip, config.server.port, file_id);
-                let upnp_class = get_upnp_class(&file.mime_type);
-
-                didl.push_str(&format!(
-                    r#"<item id="{id}" parentID="{parent_id}" restricted="1">
-                        <dc:title>{title}</dc:title>
-                        <upnp:class>{upnp_class}</upnp:class>
-                        <res protocolInfo="http-get:*:{mime}:*" size="{size}">{url}</res>
-                    </item>"#,
-                    id = file_id,
-                    parent_id = parent_id,
-                    title = xml_escape(&file.filename),
-                    upnp_class = upnp_class,
-                    mime = &file.mime_type,
-                    size = file.size,
-                    url = xml_escape(&url)
-                ));
+        for file in files.iter().filter(|f| f.mime_type.starts_with(media_type_filter)) {
+            if let Ok(relative_path) = file.path.strip_prefix(&media_root) {
+                if let Some(parent_path) = relative_path.parent() {
+                    // Check if the file is a direct child of the directory we're browsing
+                    if parent_path == browse_path {
+                        items.push(file);
+                    } 
+                    // Check if the file is in an immediate subdirectory
+                    else if parent_path.starts_with(browse_path) {
+                        if let Ok(path_after_browse) = parent_path.strip_prefix(browse_path) {
+                            if let Some(Component::Normal(name)) = path_after_browse.components().next() {
+                                sub_containers.insert(name.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
             }
         }
+        
+        // Add containers to DIDL
+        let mut sorted_containers: Vec<_> = sub_containers.into_iter().collect();
+        sorted_containers.sort_by_key(|a| a.to_lowercase());
+        for container_name in &sorted_containers {
+            let container_id = format!("{}/{}", object_id.trim_end_matches('/'), container_name);
+            didl.push_str(&format!(
+                r#"<container id="{}" parentID="{}" restricted="1"><dc:title>{}</dc:title><upnp:class>object.container</upnp:class></container>"#,
+                xml_escape(&container_id),
+                xml_escape(object_id),
+                xml_escape(container_name)
+            ));
+        }
+
+        // Add items to DIDL
+        items.sort_by_key(|f| f.filename.to_lowercase());
+        for file in &items {
+            let file_id = file.id.unwrap_or(0);
+            let url = format!("http://{}:{}/media/{}", server_ip, state.config.server.port, file_id);
+            let upnp_class = get_upnp_class(&file.mime_type);
+            didl.push_str(&format!(
+                r#"<item id="{id}" parentID="{parent_id}" restricted="1">
+                    <dc:title>{title}</dc:title>
+                    <upnp:class>{upnp_class}</upnp:class>
+                    <res protocolInfo="http-get:*:{mime}:*" size="{size}">{url}</res>
+                </item>"#,
+                id = file_id,
+                parent_id = xml_escape(object_id),
+                title = xml_escape(&file.filename),
+                upnp_class = upnp_class,
+                mime = &file.mime_type,
+                size = file.size,
+                url = xml_escape(&url)
+            ));
+        }
+        
+        number_returned = sorted_containers.len() + items.len();
     }
+
     didl.push_str("</DIDL-Lite>");
+    let total_matches = number_returned;
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>

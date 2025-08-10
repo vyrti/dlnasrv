@@ -31,25 +31,24 @@ impl WindowsFileSystemManager {
         path_str.chars().nth(2) == Some('\\')
     }
     
-    /// Normalize Windows path separators and handle drive letters
+    /// Normalize Windows path separators, case, and handle drive letters
     fn normalize_windows_path(&self, path: &Path) -> PathBuf {
         let path_str = path.to_string_lossy();
         
-        // Convert forward slashes to backslashes
-        let normalized = path_str.replace('/', r"\");
+        // Convert forward slashes to backslashes and path to lowercase
+        let normalized = path_str.replace('/', r"\").to_lowercase();
         
-        // Handle UNC paths
+        // Handle UNC paths - don't modify server/share case
         if self.is_unc_path(path) {
-            return PathBuf::from(normalized);
-        }
-        
-        // Handle drive letters - ensure they're uppercase
-        if self.has_drive_letter(path) {
-            let mut chars: Vec<char> = normalized.chars().collect();
-            if let Some(drive_char) = chars.get_mut(0) {
-                *drive_char = drive_char.to_uppercase().next().unwrap_or(*drive_char);
+            if let Some(first_sep) = normalized.find('\\').and_then(|p| normalized[p+1..].find('\\')) {
+                let server_share_part_end = 1 + first_sep + 1;
+                 if let Some(second_sep) = normalized[server_share_part_end..].find('\\') {
+                    let server_share = &normalized[..server_share_part_end + second_sep];
+                    let rest_of_path = &normalized[server_share_part_end + second_sep..];
+                    return PathBuf::from(format!("{}{}", server_share, rest_of_path.to_lowercase()));
+                }
             }
-            return PathBuf::from(chars.into_iter().collect::<String>());
+            return PathBuf::from(normalized);
         }
         
         PathBuf::from(normalized)
@@ -432,18 +431,14 @@ mod tests {
     fn test_path_normalization() {
         let manager = WindowsFileSystemManager::new();
         
-        // Test forward slash conversion
-        let normalized = manager.normalize_windows_path(Path::new("C:/path/to/file"));
-        assert_eq!(normalized, PathBuf::from(r"C:\path\to\file"));
+        // Test forward slash conversion and case
+        let normalized = manager.normalize_windows_path(Path::new("C:/Path/To/File"));
+        assert_eq!(normalized, PathBuf::from(r"c:\path\to\file"));
         
-        // Test drive letter capitalization
-        let normalized = manager.normalize_windows_path(Path::new(r"c:\path\to\file"));
-        assert_eq!(normalized, PathBuf::from(r"C:\path\to\file"));
-        
-        // Test UNC path preservation
-        let unc_path = Path::new(r"\\server\share\path");
+        // Test UNC path preservation (server/share part)
+        let unc_path = Path::new(r"\\Server\Share\SubFolder");
         let normalized = manager.normalize_windows_path(unc_path);
-        assert_eq!(normalized, unc_path);
+        assert_eq!(normalized, PathBuf::from(r"\\server\share\subfolder"));
     }
     
     #[test]

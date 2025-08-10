@@ -20,7 +20,7 @@ pub async fn root_handler() -> &'static str {
 }
 
 pub async fn description_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let xml = generate_description_xml(&state.config);
+    let xml = generate_description_xml(&state);
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "text/xml; charset=utf-8")],
@@ -55,7 +55,7 @@ pub async fn content_directory_control(
         let object_id = get_object_id(&body);
         info!("Browse request for ObjectID: {}", object_id);
         let media_files = state.media_files.read().await;
-        let response = generate_browse_response(object_id, &media_files, &state.config);
+        let response = generate_browse_response(object_id, &media_files, &state);
         (
             StatusCode::OK,
             [

@@ -1,3 +1,4 @@
+// src\database\mod.rs
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool};
@@ -167,23 +168,6 @@ impl SqliteDatabase {
         let database_url = format!("sqlite://{}?mode=rwc", db_path.display());
         let pool = SqlitePool::connect(&database_url).await?;
         
-        // Configure SQLite for better performance
-        sqlx::query("PRAGMA foreign_keys = ON")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA synchronous = NORMAL")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA cache_size = 10000")
-            .execute(&pool)
-            .await?;
-        sqlx::query("PRAGMA temp_store = MEMORY")
-            .execute(&pool)
-            .await?;
-        
         Ok(Self {
             pool,
             db_path,
@@ -270,6 +254,23 @@ impl SqliteDatabase {
 #[async_trait]
 impl DatabaseManager for SqliteDatabase {
     async fn initialize(&self) -> Result<()> {
+        // Configure SQLite for better performance
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("PRAGMA synchronous = NORMAL")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("PRAGMA cache_size = -10000") // 10MB cache
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("PRAGMA temp_store = MEMORY")
+            .execute(&self.pool)
+            .await?;
+        
         self.create_tables().await?;
         Ok(())
     }

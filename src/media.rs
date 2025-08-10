@@ -1,4 +1,3 @@
-// src/media.rs
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -132,10 +131,13 @@ impl MediaScanner {
             .await
             .map_err(|e| anyhow::anyhow!("File system scan failed: {}", e))?;
         
-        // Convert filesystem MediaFiles to database MediaFiles
+        // Convert and normalize filesystem MediaFiles to database MediaFiles
         let current_files: Vec<DbMediaFile> = fs_files
             .into_iter()
-            .map(|fs_file| self.convert_fs_to_db_media_file(fs_file))
+            .map(|mut fs_file| {
+                fs_file.path = self.filesystem_manager.normalize_path(&fs_file.path);
+                self.convert_fs_to_db_media_file(fs_file)
+            })
             .collect();
         
         // Perform incremental update
@@ -169,10 +171,10 @@ impl MediaScanner {
     ) -> Result<ScanResult> {
         let mut result = ScanResult::new();
         
-        // Create lookup maps for efficient comparison
+        // Create lookup maps for efficient comparison, ensuring keys are normalized.
         let existing_map: std::collections::HashMap<PathBuf, DbMediaFile> = existing_files
             .into_iter()
-            .map(|f| (f.path.clone(), f))
+            .map(|f| (self.filesystem_manager.normalize_path(&f.path), f))
             .collect();
         
         let current_paths: HashSet<PathBuf> = current_files
@@ -182,6 +184,7 @@ impl MediaScanner {
         
         // Process current files - add new ones or update changed ones
         for current_file in current_files {
+            // The path of current_file is already normalized from the scan_directory method.
             match existing_map.get(&current_file.path) {
                 Some(existing_file) => {
                     // File exists in database, check if it needs updating

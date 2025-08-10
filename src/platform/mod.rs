@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use thiserror::Error;
 
-pub mod network;
-pub mod filesystem;
 pub mod config;
-pub mod error;
 pub mod diagnostics;
+pub mod error;
+pub mod filesystem;
+pub mod network;
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -16,7 +16,10 @@ mod macos;
 mod linux;
 
 // Re-export the comprehensive error types from the error module
-pub use error::{PlatformError, WindowsError, MacOSError, LinuxError, DatabaseError, ConfigurationError, PlatformResult};
+pub use error::{
+    ConfigurationError, DatabaseError, LinuxError, MacOSError, PlatformError, PlatformResult,
+    WindowsError,
+};
 
 /// Operating system types supported by the platform abstraction layer
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,17 +34,17 @@ impl OsType {
     pub fn current() -> Self {
         #[cfg(target_os = "windows")]
         return OsType::Windows;
-        
+
         #[cfg(target_os = "macos")]
         return OsType::MacOS;
-        
+
         #[cfg(target_os = "linux")]
         return OsType::Linux;
-        
+
         #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
         compile_error!("Unsupported operating system");
     }
-    
+
     /// Get the display name for the operating system
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -57,19 +60,19 @@ impl OsType {
 pub struct PlatformCapabilities {
     /// Whether the platform can bind to privileged ports (< 1024) without elevation
     pub can_bind_privileged_ports: bool,
-    
+
     /// Whether the platform supports multicast networking
     pub supports_multicast: bool,
-    
+
     /// Whether the platform has a built-in firewall that may block connections
     pub has_firewall: bool,
-    
+
     /// Whether the file system is case-sensitive
     pub case_sensitive_fs: bool,
-    
+
     /// Whether the platform supports UNC paths (Windows) or similar network paths
     pub supports_network_paths: bool,
-    
+
     /// Whether the platform requires special permissions for network operations
     pub requires_network_permissions: bool,
 }
@@ -86,7 +89,7 @@ impl PlatformCapabilities {
             supports_network_paths: true, // UNC paths
             requires_network_permissions: true, // UAC for privileged ports
         };
-        
+
         #[cfg(target_os = "macos")]
         return Self {
             can_bind_privileged_ports: false, // Requires sudo
@@ -96,7 +99,7 @@ impl PlatformCapabilities {
             supports_network_paths: true, // SMB/AFP mounts
             requires_network_permissions: true, // System permissions dialog
         };
-        
+
         #[cfg(target_os = "linux")]
         return Self {
             can_bind_privileged_ports: false, // Requires root or capabilities
@@ -114,19 +117,19 @@ impl PlatformCapabilities {
 pub struct NetworkInterface {
     /// Interface name (e.g., "eth0", "wlan0", "Ethernet")
     pub name: String,
-    
+
     /// Primary IP address of the interface
     pub ip_address: IpAddr,
-    
+
     /// Whether this is a loopback interface
     pub is_loopback: bool,
-    
+
     /// Whether the interface is currently up and active
     pub is_up: bool,
-    
+
     /// Whether the interface supports multicast
     pub supports_multicast: bool,
-    
+
     /// Type of network interface
     pub interface_type: InterfaceType,
 }
@@ -146,16 +149,16 @@ pub enum InterfaceType {
 pub struct PlatformInfo {
     /// Operating system type
     pub os_type: OsType,
-    
+
     /// Operating system version string
     pub version: String,
-    
+
     /// Platform-specific capabilities
     pub capabilities: PlatformCapabilities,
-    
+
     /// Available network interfaces
     pub network_interfaces: Vec<NetworkInterface>,
-    
+
     /// Additional platform-specific metadata
     pub metadata: HashMap<String, String>,
 }
@@ -165,16 +168,16 @@ impl PlatformInfo {
     pub async fn detect() -> Result<Self, PlatformError> {
         let os_type = OsType::current();
         let capabilities = PlatformCapabilities::for_current_platform();
-        
+
         // Get OS version
         let version = Self::get_os_version()?;
-        
+
         // Detect network interfaces
         let network_interfaces = Self::detect_network_interfaces().await?;
-        
+
         // Gather platform-specific metadata
         let metadata = Self::gather_metadata(&os_type)?;
-        
+
         Ok(PlatformInfo {
             os_type,
             version,
@@ -183,50 +186,53 @@ impl PlatformInfo {
             metadata,
         })
     }
-    
+
     /// Get the operating system version string
     fn get_os_version() -> Result<String, PlatformError> {
         #[cfg(target_os = "windows")]
         {
             windows::get_windows_version()
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             macos::get_macos_version()
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             linux::get_linux_version()
         }
     }
-    
+
     /// Detect available network interfaces
     async fn detect_network_interfaces() -> Result<Vec<NetworkInterface>, PlatformError> {
         #[cfg(target_os = "windows")]
         {
             windows::detect_network_interfaces().await
         }
-        
+
         #[cfg(target_os = "macos")]
         {
             macos::detect_network_interfaces().await
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             linux::detect_network_interfaces().await
         }
     }
-    
+
     /// Gather platform-specific metadata
     fn gather_metadata(os_type: &OsType) -> Result<HashMap<String, String>, PlatformError> {
         let mut metadata = HashMap::new();
-        
+
         // Add common metadata
-        metadata.insert("architecture".to_string(), std::env::consts::ARCH.to_string());
-        
+        metadata.insert(
+            "architecture".to_string(),
+            std::env::consts::ARCH.to_string(),
+        );
+
         // Add platform-specific metadata
         match os_type {
             #[cfg(target_os = "windows")]
@@ -235,51 +241,106 @@ impl PlatformInfo {
                     metadata.extend(additional);
                 }
             }
-            
+
             #[cfg(target_os = "macos")]
             OsType::MacOS => {
                 if let Ok(additional) = macos::gather_macos_metadata() {
                     metadata.extend(additional);
                 }
             }
-            
+
             #[cfg(target_os = "linux")]
             OsType::Linux => {
                 if let Ok(additional) = linux::gather_linux_metadata() {
                     metadata.extend(additional);
                 }
             }
-            
+
             // Handle cases where we're compiling for a different target
             _ => {}
         }
-        
+
         Ok(metadata)
     }
-    
-    /// Get the best network interface for DLNA operations
+
+    /// Get the best network interface for DLNA operations using a scoring system.
     pub fn get_primary_interface(&self) -> Option<&NetworkInterface> {
-        // Filter out loopback and down interfaces
-        let candidates: Vec<_> = self.network_interfaces
+        self.network_interfaces
             .iter()
-            .filter(|iface| !iface.is_loopback && iface.is_up && iface.supports_multicast)
-            .collect();
-        
-        if candidates.is_empty() {
-            return None;
-        }
-        
-        // Prioritize interface types: Ethernet > WiFi > VPN > Other
-        candidates.into_iter()
-            .min_by_key(|iface| match iface.interface_type {
-                InterfaceType::Ethernet => 0,
-                InterfaceType::WiFi => 1,
-                InterfaceType::VPN => 2,
-                InterfaceType::Other(_) => 3,
-                InterfaceType::Loopback => 4, // Should be filtered out above
+            .filter(|iface| {
+                // Pre-filter for usable interfaces
+                !iface.is_loopback && iface.is_up && iface.supports_multicast
+            })
+            .max_by_key(|iface| {
+                let mut score = 0;
+
+                // Score based on IP address type
+                if let IpAddr::V4(ipv4) = iface.ip_address {
+                    if ipv4.is_private() {
+                        score += 100;
+                        // Bonus for the most common home network range
+                        if ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168 {
+                            score += 20;
+                        }
+                        // Slightly less bonus for 10.x.x.x range
+                        if ipv4.octets()[0] == 10 {
+                            score += 10;
+                        }
+                        // Penalize 172.16.0.0/12 range slightly as it's common for Docker/VMs
+                        if ipv4.octets()[0] == 172 && (ipv4.octets()[1] >= 16 && ipv4.octets()[1] <= 31) {
+                            score -= 30;
+                        }
+                    } else if ipv4.is_link_local() {
+                        // APIPA 169.254.x.x
+                        score -= 200;
+                    } else {
+                        // Public IPs are less likely to be for local DLNA
+                        score -= 50;
+                    }
+                } else {
+                    // Penalize IPv6 slightly for now as IPv4 is more common for DLNA
+                    score -= 10;
+                }
+
+                // Score based on interface type
+                match &iface.interface_type {
+                    InterfaceType::Ethernet => score += 50,
+                    InterfaceType::WiFi => score += 40,
+                    InterfaceType::VPN => score -= 100, // Usually not desired for local discovery
+                    _ => {}
+                }
+
+                // Penalize common virtual/undesirable adapter names
+                let name_lower = iface.name.to_lowercase();
+                let undesirable_keywords = [
+                    "virtual",
+                    "hyper-v",
+                    "vmware",
+                    "vbox",
+                    "vethernet",
+                    "default switch",
+                    "teredo",
+                    "isatap",
+                ];
+                if undesirable_keywords
+                    .iter()
+                    .any(|&keyword| name_lower.contains(keyword))
+                {
+                    score -= 150;
+                }
+
+                // Log score for debugging purposes
+                tracing::debug!(
+                    "Interface '{}' ({}) scored {}",
+                    iface.name,
+                    iface.ip_address,
+                    score
+                );
+
+                score
             })
     }
-    
+
     /// Check if the platform supports a specific feature
     pub fn supports_feature(&self, feature: &str) -> bool {
         match feature {
@@ -294,16 +355,14 @@ impl PlatformInfo {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_os_type_detection() {
         let os_type = OsType::current();
-        
+
         // Verify we get a valid OS type
         match os_type {
             OsType::Windows | OsType::MacOS | OsType::Linux => {
@@ -312,27 +371,76 @@ mod tests {
             }
         }
     }
-    
+
     #[test]
     fn test_platform_capabilities() {
         let capabilities = PlatformCapabilities::for_current_platform();
-        
+
         // All platforms should support multicast
         assert!(capabilities.supports_multicast);
-        
+
         // All platforms should have some form of firewall
         assert!(capabilities.has_firewall);
     }
-    
+
     #[tokio::test]
     async fn test_platform_info_detection() {
         let platform_info = PlatformInfo::detect().await;
-        
+
         // Platform detection should succeed
         assert!(platform_info.is_ok());
-        
+
         let info = platform_info.unwrap();
         assert!(!info.version.is_empty());
         assert!(!info.metadata.is_empty());
+    }
+
+    #[test]
+    fn test_primary_interface_scoring() {
+        let ethernet_iface = NetworkInterface {
+            name: "Ethernet".to_string(),
+            ip_address: "192.168.1.10".parse().unwrap(),
+            is_loopback: false,
+            is_up: true,
+            supports_multicast: true,
+            interface_type: InterfaceType::Ethernet,
+        };
+        let wifi_iface = NetworkInterface {
+            name: "Wi-Fi".to_string(),
+            ip_address: "10.0.0.5".parse().unwrap(),
+            is_loopback: false,
+            is_up: true,
+            supports_multicast: true,
+            interface_type: InterfaceType::WiFi,
+        };
+        let hyperv_iface = NetworkInterface {
+            name: "vEthernet (Default Switch)".to_string(),
+            ip_address: "172.20.80.1".parse().unwrap(),
+            is_loopback: false,
+            is_up: true,
+            supports_multicast: true,
+            interface_type: InterfaceType::Ethernet, // Hyper-V reports as Ethernet
+        };
+
+        let platform_info = PlatformInfo {
+            os_type: OsType::Windows,
+            version: "".to_string(),
+            capabilities: PlatformCapabilities::for_current_platform(),
+            network_interfaces: vec![
+                ethernet_iface.clone(),
+                wifi_iface.clone(),
+                hyperv_iface.clone(),
+            ],
+            metadata: HashMap::new(),
+        };
+
+        let primary = platform_info.get_primary_interface();
+        assert!(primary.is_some());
+        // Ethernet with 192.168.x.x should be preferred
+        assert_eq!(primary.unwrap().name, "Ethernet");
+        assert_eq!(
+            primary.unwrap().ip_address,
+            "192.168.1.10".parse::<IpAddr>().unwrap()
+        );
     }
 }

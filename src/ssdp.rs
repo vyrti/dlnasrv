@@ -1,4 +1,4 @@
-use crate::{config::AppConfig, state::AppState};
+use crate::state::AppState;
 use crate::platform::network::{NetworkManager, SsdpConfig, PlatformNetworkManager};
 use anyhow::Result;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -10,32 +10,29 @@ const SSDP_PORT: u16 = 1900;
 const ANNOUNCE_INTERVAL_SECS: u64 = 300; // Announce every 5 minutes
 
 pub fn run_ssdp_service(state: AppState) -> Result<()> {
-    let config = state.config;
-
-    // Create platform-specific network manager
     let network_manager = Arc::new(PlatformNetworkManager::new());
 
     // Task for responding to M-SEARCH requests
-    let search_config = config.clone();
+    let search_state = state.clone();
     let search_manager = network_manager.clone();
     tokio::spawn(async move {
-        if let Err(e) = ssdp_search_responder(search_config, search_manager).await {
+        if let Err(e) = ssdp_search_responder(search_state, search_manager).await {
             error!("SSDP search responder failed: {}", e);
         }
     });
 
     // Task for periodically sending NOTIFY announcements
-    let announce_config = config.clone();
-    let announce_manager = network_manager.clone();
+    let announce_state = state;
+    let announce_manager = network_manager;
     tokio::spawn(async move {
-        ssdp_announcer(announce_config, announce_manager).await;
+        ssdp_announcer(announce_state, announce_manager).await;
     });
 
     info!("SSDP service started with platform abstraction");
     Ok(())
 }
 
-async fn ssdp_search_responder(config: Arc<AppConfig>, network_manager: Arc<PlatformNetworkManager>) -> Result<()> {
+async fn ssdp_search_responder(state: AppState, network_manager: Arc<PlatformNetworkManager>) -> Result<()> {
     const MAX_SOCKET_RETRIES: u32 = 3;
     const MAX_MULTICAST_RETRIES: u32 = 5;
     const RETRY_DELAY_MS: u64 = 1000;
@@ -65,12 +62,14 @@ async fn ssdp_search_responder(config: Arc<AppConfig>, network_manager: Arc<Plat
     let mut socket = socket.unwrap();
     let socket_port = socket.port;
 
-    // Join multicast group with retry logic
+    // Join multicast group with retry logic, using the primary interface from AppState
     let multicast_addr = SSDP_MULTICAST_ADDR.parse().unwrap();
+    let primary_interface = state.platform_info.get_primary_interface().cloned();
+    
     let mut multicast_enabled = false;
     
     for attempt in 1..=MAX_MULTICAST_RETRIES {
-        match network_manager.join_multicast_group(&mut socket, multicast_addr, None).await {
+        match network_manager.join_multicast_group(&mut socket, multicast_addr, primary_interface.as_ref()).await {
             Ok(()) => {
                 info!("Successfully joined SSDP multicast group on port {} (attempt {})", socket_port, attempt);
                 multicast_enabled = true;
@@ -136,7 +135,7 @@ async fn ssdp_search_responder(config: Arc<AppConfig>, network_manager: Arc<Plat
                         let mut all_responses_sent = true;
                         let response_count = response_types.len();
                         for response_type in response_types {
-                            let response = create_ssdp_response(&config, socket_port, response_type);
+                            let response = create_ssdp_response(&state, socket_port, response_type).await;
                             info!("Sending SSDP response to {} ({}): {}", addr, response_type, response.trim());
                             
                             // Retry response sending with exponential backoff
@@ -192,7 +191,7 @@ async fn ssdp_search_responder(config: Arc<AppConfig>, network_manager: Arc<Plat
                             consecutive_errors = 0;
                             
                             // Try to rejoin multicast group
-                            if let Err(e) = network_manager.join_multicast_group(&mut socket, multicast_addr, None).await {
+                            if let Err(e) = network_manager.join_multicast_group(&mut socket, multicast_addr, primary_interface.as_ref()).await {
                                 warn!("Failed to rejoin multicast group after socket recreation: {}", e);
                             }
                         }
@@ -211,7 +210,7 @@ async fn ssdp_search_responder(config: Arc<AppConfig>, network_manager: Arc<Plat
     }
 }
 
-async fn ssdp_announcer(config: Arc<AppConfig>, network_manager: Arc<PlatformNetworkManager>) {
+async fn ssdp_announcer(state: AppState, network_manager: Arc<PlatformNetworkManager>) {
     let mut interval = interval(Duration::from_secs(ANNOUNCE_INTERVAL_SECS));
     let mut consecutive_failures = 0;
     const MAX_CONSECUTIVE_FAILURES: u32 = 5;
@@ -219,7 +218,7 @@ async fn ssdp_announcer(config: Arc<AppConfig>, network_manager: Arc<PlatformNet
     loop {
         interval.tick().await;
         
-        match send_ssdp_alive(&config, &network_manager).await {
+        match send_ssdp_alive(&state, &network_manager).await {
             Ok(()) => {
                 consecutive_failures = 0; // Reset failure counter on success
             }
@@ -246,7 +245,7 @@ async fn ssdp_announcer(config: Arc<AppConfig>, network_manager: Arc<PlatformNet
     }
 }
 
-async fn send_ssdp_alive(config: &AppConfig, network_manager: &PlatformNetworkManager) -> Result<()> {
+async fn send_ssdp_alive(state: &AppState, network_manager: &PlatformNetworkManager) -> Result<()> {
     const MAX_SOCKET_CREATION_RETRIES: u32 = 3;
     const MAX_SEND_RETRIES: u32 = 3;
     
@@ -274,15 +273,16 @@ async fn send_ssdp_alive(config: &AppConfig, network_manager: &PlatformNetworkMa
     }
 
     let mut socket = socket.unwrap();
-    let socket_port = socket.port;
 
-    // Enable multicast on the announcement socket
-    let multicast_addr = SSDP_MULTICAST_ADDR.parse().unwrap();
-    if let Err(e) = network_manager.join_multicast_group(&mut socket, multicast_addr, None).await {
+    // Enable multicast on the announcement socket, using the primary interface from AppState
+    let multicast_addr_ip = SSDP_MULTICAST_ADDR.parse().unwrap();
+    let primary_interface = state.platform_info.get_primary_interface().cloned();
+    if let Err(e) = network_manager.join_multicast_group(&mut socket, multicast_addr_ip, primary_interface.as_ref()).await {
         warn!("Failed to enable multicast on announcement socket: {}", e);
     }
 
-    let server_ip = get_server_ip(config);
+    let server_ip = get_server_ip(state).await;
+    let config = &state.config;
 
     // Send NOTIFY for multiple service types
     let service_types = [
@@ -376,8 +376,9 @@ async fn send_ssdp_alive(config: &AppConfig, network_manager: &PlatformNetworkMa
     Ok(())
 }
 
-fn create_ssdp_response(config: &AppConfig, ssdp_port: u16, service_type: &str) -> String {
-    let server_ip = get_server_ip(config);
+async fn create_ssdp_response(state: &AppState, _ssdp_port: u16, service_type: &str) -> String {
+    let server_ip = get_server_ip(state).await;
+    let config = &state.config;
     
     let (st, usn) = match service_type {
         "upnp:rootdevice" => (
@@ -411,38 +412,25 @@ fn create_ssdp_response(config: &AppConfig, ssdp_port: u16, service_type: &str) 
     )
 }
 
-fn get_server_ip(config: &AppConfig) -> String {
-    if config.server.interface != "0.0.0.0" {
-        return config.server.interface.clone();
+async fn get_server_ip(state: &AppState) -> String {
+    // 1. Use the primary interface detected at startup.
+    if let Some(iface) = state.platform_info.get_primary_interface() {
+        return iface.ip_address.to_string();
+    }
+
+    // 2. Fallback to the configured server interface if it's not a wildcard.
+    if state.config.server.interface != "0.0.0.0" && !state.config.server.interface.is_empty() {
+        return state.config.server.interface.clone();
     }
     
-    // Try to get the actual network IP dynamically
-    use std::process::Command;
-    
-    // Try to get the default route interface IP
-    if let Ok(output) = Command::new("route").args(&["get", "default"]).output() {
-        let route_str = String::from_utf8_lossy(&output.stdout);
-        if let Some(interface_line) = route_str.lines().find(|line| line.trim().starts_with("interface:")) {
-            if let Some(iface_name) = interface_line.split(':').nth(1) {
-                let iface_name = iface_name.trim();
-                
-                // Get IP for this interface
-                if let Ok(ip_output) = Command::new("ifconfig").arg(iface_name).output() {
-                    let ip_str = String::from_utf8_lossy(&ip_output.stdout);
-                    if let Some(inet_line) = ip_str.lines().find(|line| line.trim().starts_with("inet ") && !line.contains("inet6")) {
-                        if let Some(ip_part) = inet_line.trim().split_whitespace().nth(1) {
-                            if let Ok(ip) = ip_part.parse::<std::net::IpAddr>() {
-                                if !ip.is_loopback() {
-                                    return ip.to_string();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // 3. Last resort: re-detect and find a suitable one.
+    warn!("Primary interface not found in AppState, re-detecting...");
+    let network_manager = PlatformNetworkManager::new();
+    if let Ok(iface) = network_manager.get_primary_interface().await {
+        return iface.ip_address.to_string();
     }
-    
-    // Fallback to the known working IP
-    "192.168.1.126".to_string()
+
+    // 4. Final fallback.
+    warn!("Could not determine a specific server IP; falling back to 127.0.0.1. DLNA clients may not be able to connect.");
+    "127.0.0.1".to_string()
 }

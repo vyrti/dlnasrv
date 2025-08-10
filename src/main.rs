@@ -1,38 +1,17 @@
-mod config;
-mod database;
-mod error;
-mod logging;
-mod media;
-mod platform;
-mod ssdp;
-mod watcher;
-mod web;
-
 use anyhow::Context;
+use opendlna::{
+    config::AppConfig,
+    database::{self, DatabaseManager, SqliteDatabase},
+    logging, media,
+    platform::{self, PlatformInfo},
+    ssdp,
+    state::AppState,
+    watcher::{CrossPlatformWatcher, FileSystemEvent, FileSystemWatcher},
+    web,
+};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
-
-use config::AppConfig;
-use database::{DatabaseManager, SqliteDatabase};
-use platform::PlatformInfo;
-use watcher::{FileSystemWatcher, CrossPlatformWatcher, FileSystemEvent};
-use state::AppState;
-
-// Publicly export the AppState for use in other modules
-pub mod state {
-    use crate::{config::AppConfig, database::{DatabaseManager, MediaFile}};
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
-
-    #[derive(Clone)]
-    pub struct AppState {
-        pub config: Arc<AppConfig>,
-        pub media_files: Arc<RwLock<Vec<MediaFile>>>,
-        pub database: Arc<dyn DatabaseManager>,
-        pub platform_info: Arc<crate::platform::PlatformInfo>,
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -9,7 +9,11 @@ pub mod watcher;
 pub mod web;
 
 pub mod state {
-    use crate::{config::AppConfig, database::MediaFile};
+    use crate::{
+        config::AppConfig,
+        database::{DatabaseManager, MediaFile},
+        platform::PlatformInfo,
+    };
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
@@ -17,5 +21,7 @@ pub mod state {
     pub struct AppState {
         pub config: Arc<AppConfig>,
         pub media_files: Arc<RwLock<Vec<MediaFile>>>,
+        pub database: Arc<dyn DatabaseManager>,
+        pub platform_info: Arc<PlatformInfo>,
     }
 }

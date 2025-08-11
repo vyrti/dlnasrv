@@ -209,11 +209,38 @@ where
         }
     }
 
-    /// Handle a new file being added
+    /// Handle a new file or directory being added
     async fn handle_file_added(database: &Arc<D>, path: &Path) -> Result<()> {
-        // Check if file still exists (might have been deleted quickly)
+        // Check if path still exists (might have been deleted quickly)
         if !path.exists() {
-            debug!("File no longer exists, skipping add: {:?}", path);
+            debug!("Path no longer exists, skipping add: {:?}", path);
+            return Ok(());
+        }
+
+        if path.is_dir() {
+            // Handle directory creation by scanning for media files
+            info!("New directory detected, scanning for media files: {:?}", path);
+            match Self::scan_directory_recursive(path).await {
+                Ok(media_files) => {
+                    info!("Found {} media files in new directory: {:?}", media_files.len(), path);
+                    
+                    // Add each media file found in the new directory
+                    for media_file_path in media_files {
+                        if let Err(e) = Box::pin(Self::handle_file_added(database, &media_file_path)).await {
+                            error!("Failed to add media file from new directory {:?}: {}", media_file_path, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to scan new directory {:?}: {}", path, e);
+                }
+            }
+            return Ok(());
+        }
+
+        // Handle regular file addition
+        if !Self::is_media_file(path) {
+            debug!("Not a media file, skipping: {:?}", path);
             return Ok(());
         }
 
@@ -281,19 +308,60 @@ where
         Ok(())
     }
 
-    /// Handle a file being removed
+    /// Handle a file or directory being removed
     async fn handle_file_removed(database: &Arc<D>, path: &Path) -> Result<()> {
+        // For directory removal, we need to remove all media files that were in that directory
+        // Since the directory no longer exists, we can't check if it was a directory,
+        // so we'll try to remove it as both a file and check for files in that path prefix
+        
+        // First, try to remove as a single file
+        let mut removed_any = false;
         match database.remove_media_file(path).await {
             Ok(removed) => {
                 if removed {
                     info!("Removed media file from database: {:?}", path);
-                } else {
-                    debug!("File was not in database: {:?}", path);
+                    removed_any = true;
                 }
             }
             Err(e) => {
-                error!("Failed to remove media file {:?}: {}", path, e);
+                debug!("Failed to remove as single file {:?}: {}", path, e);
             }
+        }
+
+        // Also check if this was a directory by looking for files with this path as prefix
+        // This handles the case where a directory was deleted
+        match database.get_all_media_files().await {
+            Ok(all_files) => {
+                let files_in_deleted_path: Vec<_> = all_files
+                    .iter()
+                    .filter(|file| file.path.starts_with(path))
+                    .collect();
+
+                if !files_in_deleted_path.is_empty() {
+                    info!("Removing {} media files from deleted directory: {:?}", files_in_deleted_path.len(), path);
+                    
+                    for file in files_in_deleted_path {
+                        match database.remove_media_file(&file.path).await {
+                            Ok(removed) => {
+                                if removed {
+                                    debug!("Removed media file from deleted directory: {:?}", file.path);
+                                    removed_any = true;
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to remove media file from deleted directory {:?}: {}", file.path, e);
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to get all media files for directory cleanup: {}", e);
+            }
+        }
+
+        if !removed_any {
+            debug!("No files were removed for path: {:?}", path);
         }
 
         Ok(())

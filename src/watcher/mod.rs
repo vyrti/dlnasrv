@@ -100,43 +100,60 @@ impl CrossPlatformWatcher {
         let mut fs_events = Vec::new();
         
         for event in events {
-            // Only process events for media files
-            let media_paths: Vec<_> = event.event.paths.iter()
-                .filter(|path| self.is_media_file(path))
-                .collect();
-                
-            if media_paths.is_empty() {
-                continue;
-            }
-
             match event.event.kind {
                 notify::EventKind::Create(_) => {
-                    for path in media_paths {
-                        debug!("Media file created: {:?}", path);
-                        fs_events.push(FileSystemEvent::Created(path.clone()));
+                    for path in &event.event.paths {
+                        if path.is_dir() {
+                            // Handle directory creation - scan for media files
+                            debug!("Directory created: {:?}", path);
+                            // We'll handle this in the integration layer by triggering a scan
+                            fs_events.push(FileSystemEvent::Created(path.clone()));
+                        } else if self.is_media_file(path) {
+                            debug!("Media file created: {:?}", path);
+                            fs_events.push(FileSystemEvent::Created(path.clone()));
+                        }
                     }
                 }
                 notify::EventKind::Modify(_) => {
+                    // Only process modify events for media files
+                    let media_paths: Vec<_> = event.event.paths.iter()
+                        .filter(|path| self.is_media_file(path))
+                        .collect();
+                    
                     for path in media_paths {
                         debug!("Media file modified: {:?}", path);
                         fs_events.push(FileSystemEvent::Modified(path.clone()));
                     }
                 }
                 notify::EventKind::Remove(_) => {
-                    for path in media_paths {
-                        debug!("Media file deleted: {:?}", path);
-                        fs_events.push(FileSystemEvent::Deleted(path.clone()));
+                    for path in &event.event.paths {
+                        if path.is_dir() {
+                            // Handle directory removal
+                            debug!("Directory deleted: {:?}", path);
+                            fs_events.push(FileSystemEvent::Deleted(path.clone()));
+                        } else if self.is_media_file(path) {
+                            debug!("Media file deleted: {:?}", path);
+                            fs_events.push(FileSystemEvent::Deleted(path.clone()));
+                        }
                     }
                 }
                 notify::EventKind::Other => {
-                    // Handle platform-specific events
+                    // Handle platform-specific events for media files only
+                    let media_paths: Vec<_> = event.event.paths.iter()
+                        .filter(|path| self.is_media_file(path))
+                        .collect();
+                    
                     for path in media_paths {
                         debug!("Media file other event: {:?}", path);
                         fs_events.push(FileSystemEvent::Modified(path.clone()));
                     }
                 }
                 _ => {
-                    // Handle other event types as modifications
+                    // Handle other event types as modifications for media files only
+                    let media_paths: Vec<_> = event.event.paths.iter()
+                        .filter(|path| self.is_media_file(path))
+                        .collect();
+                    
                     for path in media_paths {
                         debug!("Media file generic event: {:?}", path);
                         fs_events.push(FileSystemEvent::Modified(path.clone()));
@@ -159,10 +176,16 @@ impl CrossPlatformWatcher {
             move |result: DebounceEventResult| {
                 match result {
                     Ok(events) => {
-                        // Filter events for media files only
-                        let media_events: Vec<_> = events.into_iter()
+                        // Filter events for media files OR directories
+                        let relevant_events: Vec<_> = events.into_iter()
                             .filter(|event| {
                                 event.paths.iter().any(|path| {
+                                    // Include directories and media files
+                                    if path.is_dir() {
+                                        return true;
+                                    }
+                                    
+                                    // Include media files
                                     if let Some(extension) = path.extension() {
                                         if let Some(ext_str) = extension.to_str() {
                                             return media_extensions.contains(&ext_str.to_lowercase());
@@ -173,7 +196,7 @@ impl CrossPlatformWatcher {
                             })
                             .collect();
 
-                        if !media_events.is_empty() {
+                        if !relevant_events.is_empty() {
                             let watcher = CrossPlatformWatcher {
                                 debouncer: Arc::new(RwLock::new(None)),
                                 event_sender: event_sender.clone(),
@@ -183,7 +206,7 @@ impl CrossPlatformWatcher {
                                 debounce_duration: Duration::from_millis(500),
                             };
                             
-                            let fs_events = watcher.convert_events(media_events);
+                            let fs_events = watcher.convert_events(relevant_events);
                             for fs_event in fs_events {
                                 if let Err(e) = event_sender.try_send(fs_event) {
                                     error!("Failed to send file system event: {}", e);

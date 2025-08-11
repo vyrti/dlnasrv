@@ -11,7 +11,7 @@ use opendlna::{
 };
 use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -820,23 +820,69 @@ async fn handle_file_system_event(
 ) -> anyhow::Result<()> {
     match event {
         FileSystemEvent::Created(path) => {
-            info!("Media file created: {}", path.display());
-            
-            // Create MediaFile record
-            let metadata = tokio::fs::metadata(&path).await?;
-            let mime_type = media::get_mime_type(&path);
-            let mut media_file = database::MediaFile::new(path.clone(), metadata.len(), mime_type);
-            media_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
-            
-            // Store in database
-            let file_id = database.store_media_file(&media_file).await?;
-            media_file.id = Some(file_id);
-            
-            // Add to in-memory cache
-            let mut files = media_files.write().await;
-            files.push(media_file);
-            
-            info!("Added new media file to database: {}", path.display());
+            // Check if this is a directory or a file
+            if path.is_dir() {
+                info!("Directory created: {}", path.display());
+                
+                // Scan the new directory for media files
+                let scanner = media::MediaScanner::with_database(database.clone());
+                match scanner.scan_directory_recursive(&path).await {
+                    Ok(scan_result) => {
+                        info!("Scanned new directory {}: {}", path.display(), scan_result.summary());
+                        
+                        // Update in-memory cache with newly found files
+                        if !scan_result.new_files.is_empty() {
+                            let mut files = media_files.write().await;
+                            for new_file in &scan_result.new_files {
+                                // Only add if not already in cache
+                                if !files.iter().any(|f| f.path == new_file.path) {
+                                    files.push(new_file.clone());
+                                }
+                            }
+                        }
+                        
+                        info!("Added {} media files from new directory: {}", scan_result.new_files.len(), path.display());
+                    }
+                    Err(e) => {
+                        error!("Failed to scan new directory {}: {}", path.display(), e);
+                    }
+                }
+            } else {
+                // Handle individual media file creation
+                info!("Media file created: {}", path.display());
+                
+                // Check if it's actually a media file
+                let is_media_file = if let Some(extension) = path.extension() {
+                    if let Some(ext_str) = extension.to_str() {
+                        crate::platform::filesystem::is_supported_media_extension(ext_str)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                
+                if !is_media_file {
+                    debug!("Not a supported media file, ignoring: {}", path.display());
+                    return Ok(());
+                }
+                
+                // Create MediaFile record
+                let metadata = tokio::fs::metadata(&path).await?;
+                let mime_type = media::get_mime_type(&path);
+                let mut media_file = database::MediaFile::new(path.clone(), metadata.len(), mime_type);
+                media_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
+                
+                // Store in database
+                let file_id = database.store_media_file(&media_file).await?;
+                media_file.id = Some(file_id);
+                
+                // Add to in-memory cache
+                let mut files = media_files.write().await;
+                files.push(media_file);
+                
+                info!("Added new media file to database: {}", path.display());
+            }
         }
         
         FileSystemEvent::Modified(path) => {
@@ -861,16 +907,46 @@ async fn handle_file_system_event(
         }
         
         FileSystemEvent::Deleted(path) => {
-            info!("Media file deleted: {}", path.display());
+            // Since the path no longer exists, we can't check if it was a directory
+            // We'll handle both cases: try to remove as a single file, and also
+            // remove any files that were in this path (in case it was a directory)
             
-            // Remove from database
-            database.remove_media_file(&path).await?;
+            info!("Path deleted: {}", path.display());
+            
+            // First, try to remove as a single file
+            let single_file_removed = database.remove_media_file(&path).await?;
+            
+            // Also check for files that were in this directory path
+            let all_files = database.get_all_media_files().await?;
+            let files_in_deleted_path: Vec<_> = all_files
+                .iter()
+                .filter(|file| file.path.starts_with(&path))
+                .collect();
+            
+            let mut total_removed = if single_file_removed { 1 } else { 0 };
+            
+            if !files_in_deleted_path.is_empty() {
+                info!("Removing {} media files from deleted directory: {}", files_in_deleted_path.len(), path.display());
+                
+                for file in &files_in_deleted_path {
+                    if database.remove_media_file(&file.path).await? {
+                        total_removed += 1;
+                    }
+                }
+            }
             
             // Remove from in-memory cache
             let mut files = media_files.write().await;
-            files.retain(|f| f.path != path);
+            let initial_count = files.len();
+            files.retain(|f| !f.path.starts_with(&path));
+            let removed_from_cache = initial_count - files.len();
             
-            info!("Removed media file from database: {}", path.display());
+            if total_removed > 0 {
+                info!("Removed {} media files from database and {} from cache for deleted path: {}", 
+                      total_removed, removed_from_cache, path.display());
+            } else {
+                debug!("No media files found to remove for deleted path: {}", path.display());
+            }
         }
         
         FileSystemEvent::Renamed { from, to } => {

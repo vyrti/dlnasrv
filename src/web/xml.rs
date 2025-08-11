@@ -150,11 +150,42 @@ pub fn generate_browse_response(
         // Create a Path from the ObjectID's path part for reliable comparison
         let browse_path = Path::new(path_prefix_str);
 
+        tracing::info!("Browse request - media_root: {:?}, browse_path: {:?}, media_type_filter: {}", media_root, browse_path, media_type_filter);
+        tracing::info!("Total files to filter: {}", files.len());
+
         for file in files.iter().filter(|f| f.mime_type.starts_with(media_type_filter)) {
-            if let Ok(relative_path) = file.path.strip_prefix(&media_root) {
+            tracing::debug!("Processing file: {:?} with mime_type: {}", file.path, file.mime_type);
+            
+            // Try to get relative path from media_root, handling case sensitivity and path normalization
+            let relative_path_result = if cfg!(windows) {
+                // On Windows, do case-insensitive comparison
+                let file_path_lower = file.path.to_string_lossy().to_lowercase();
+                let media_root_lower = media_root.to_string_lossy().to_lowercase();
+                
+                if file_path_lower.starts_with(&media_root_lower) {
+                    // Manually strip the prefix and create a relative path
+                    let remaining = &file.path.to_string_lossy()[media_root.to_string_lossy().len()..];
+                    let remaining = remaining.trim_start_matches(['/', '\\']);
+                    if remaining.is_empty() {
+                        Ok(PathBuf::new())
+                    } else {
+                        Ok(PathBuf::from(remaining))
+                    }
+                } else {
+                    Err(())
+                }
+            } else {
+                // On Unix systems, use standard strip_prefix
+                file.path.strip_prefix(&media_root).map(|p| p.to_path_buf()).map_err(|_| ())
+            };
+            
+            if let Ok(relative_path) = relative_path_result {
+                tracing::debug!("Relative path: {:?}", relative_path);
                 if let Some(parent_path) = relative_path.parent() {
+                    tracing::debug!("Parent path: {:?}, browse_path: {:?}", parent_path, browse_path);
                     // Check if the file is a direct child of the directory we're browsing
                     if parent_path == browse_path {
+                        tracing::debug!("Adding file as direct child: {:?}", file.filename);
                         items.push(file);
                     } 
                     // Check if the file is in an immediate subdirectory
@@ -166,6 +197,8 @@ pub fn generate_browse_response(
                         }
                     }
                 }
+            } else {
+                tracing::debug!("Failed to strip prefix from file path: {:?}", file.path);
             }
         }
         

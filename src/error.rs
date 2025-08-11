@@ -208,45 +208,45 @@ impl AppError {
     pub fn log_error(&self) {
         match self {
             AppError::Platform(platform_err) => {
-                log::error!("Platform error: {}", platform_err);
+                tracing::error!("Platform error: {}", platform_err);
                 if platform_err.is_recoverable() {
-                    log::info!("Recovery actions available: {:?}", platform_err.recovery_actions());
+                    tracing::info!("Recovery actions available: {:?}", platform_err.recovery_actions());
                 }
             }
             AppError::Database(db_err) => {
-                log::error!("Database error: {}", db_err);
+                tracing::error!("Database error: {}", db_err);
                 if db_err.is_recoverable() {
-                    log::info!("Database recovery strategy: {}", db_err.recovery_strategy());
+                    tracing::info!("Database recovery strategy: {}", db_err.recovery_strategy());
                 }
             }
             AppError::Configuration(config_err) => {
-                log::warn!("Configuration error: {}", config_err);
-                log::info!("Configuration solution: {}", config_err.solution_guide());
+                tracing::warn!("Configuration error: {}", config_err);
+                tracing::info!("Configuration solution: {}", config_err.solution_guide());
             }
             AppError::MediaScan(msg) => {
-                log::warn!("Media scan error: {}", msg);
-                log::info!("Media scanning can be retried or directories can be reconfigured");
+                tracing::warn!("Media scan error: {}", msg);
+                tracing::info!("Media scanning can be retried or directories can be reconfigured");
             }
             AppError::NetworkDiscovery(msg) => {
-                log::error!("Network discovery error: {}", msg);
-                log::info!("Check network configuration and firewall settings");
+                tracing::error!("Network discovery error: {}", msg);
+                tracing::info!("Check network configuration and firewall settings");
             }
             AppError::FileServing(msg) => {
-                log::warn!("File serving error: {}", msg);
-                log::info!("Check file permissions and disk space");
+                tracing::warn!("File serving error: {}", msg);
+                tracing::info!("Check file permissions and disk space");
             }
             AppError::Watcher(err) => {
-                log::warn!("File watcher error: {}", err);
-                log::info!("File monitoring can be restarted");
+                tracing::warn!("File watcher error: {}", err);
+                tracing::info!("File monitoring can be restarted");
             }
             AppError::NotFound => {
-                log::debug!("Resource not found - this is normal for some requests");
+                tracing::debug!("Resource not found - this is normal for some requests");
             }
             AppError::InvalidRange => {
-                log::debug!("Invalid range request - client issue");
+                tracing::debug!("Invalid range request - client issue");
             }
             _ => {
-                log::error!("Application error: {}", self);
+                tracing::error!("Application error: {}", self);
             }
         }
     }
@@ -278,11 +278,11 @@ where
             Ok(result) => return Ok(result),
             Err(error) => {
                 if attempt == max_attempts {
-                    log::error!("Operation failed after {} attempts: {:?}", max_attempts, error);
+                    tracing::error!("Operation failed after {} attempts: {:?}", max_attempts, error);
                     return Err(error);
                 }
                 
-                log::warn!("Operation failed on attempt {}/{}: {:?}. Retrying in {}ms", 
+                tracing::warn!("Operation failed on attempt {}/{}: {:?}. Retrying in {}ms", 
                     attempt, max_attempts, error, delay_ms);
                 
                 tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;

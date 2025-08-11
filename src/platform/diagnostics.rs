@@ -162,7 +162,7 @@ pub struct ProcessInfo {
 impl DiagnosticInfo {
     /// Collect comprehensive diagnostic information
     pub async fn collect() -> Result<Self, PlatformError> {
-        log::info!("Collecting diagnostic information...");
+        tracing::info!("Collecting diagnostic information...");
         
         let platform_info = PlatformInfo::detect().await?;
         
@@ -432,88 +432,88 @@ impl DiagnosticInfo {
     
     /// Log diagnostic information at startup
     pub fn log_startup_diagnostics(&self) {
-        log::info!("=== OpenDLNA Startup Diagnostics ===");
-        log::info!("Platform: {} {} ({})", 
+        tracing::info!("=== OpenDLNA Startup Diagnostics ===");
+        tracing::info!("Platform: {} {} ({})", 
             self.platform.os_type, 
             self.platform.os_version, 
             self.platform.architecture
         );
-        log::info!("Hostname: {}", self.platform.hostname);
+        tracing::info!("Hostname: {}", self.platform.hostname);
         
         // Log platform capabilities
-        log::info!("Platform Capabilities:");
-        log::info!("  - Privileged ports: {}", self.platform.capabilities.can_bind_privileged_ports);
-        log::info!("  - Multicast support: {}", self.platform.capabilities.supports_multicast);
-        log::info!("  - Firewall present: {}", self.platform.capabilities.has_firewall);
-        log::info!("  - Case-sensitive FS: {}", self.platform.capabilities.case_sensitive_fs);
+        tracing::info!("Platform Capabilities:");
+        tracing::info!("  - Privileged ports: {}", self.platform.capabilities.can_bind_privileged_ports);
+        tracing::info!("  - Multicast support: {}", self.platform.capabilities.supports_multicast);
+        tracing::info!("  - Firewall present: {}", self.platform.capabilities.has_firewall);
+        tracing::info!("  - Case-sensitive FS: {}", self.platform.capabilities.case_sensitive_fs);
         
         // Log network information
-        log::info!("Network Configuration:");
-        log::info!("  - Interfaces found: {}", self.network.interfaces.len());
+        tracing::info!("Network Configuration:");
+        tracing::info!("  - Interfaces found: {}", self.network.interfaces.len());
         if let Some(primary) = &self.network.primary_interface {
-            log::info!("  - Primary interface: {}", primary);
+            tracing::info!("  - Primary interface: {}", primary);
         }
-        log::info!("  - Multicast support: {}", self.network.multicast_support);
-        log::info!("  - Firewall status: {:?}", self.network.firewall_status);
+        tracing::info!("  - Multicast support: {}", self.network.multicast_support);
+        tracing::info!("  - Firewall status: {:?}", self.network.firewall_status);
         
         // Log port availability
-        log::info!("Port Availability:");
+        tracing::info!("Port Availability:");
         for (port, available) in &self.network.port_availability {
             let status = if *available { "Available" } else { "In use" };
-            log::info!("  - Port {}: {}", port, status);
+            tracing::info!("  - Port {}: {}", port, status);
         }
         
         // Log connectivity tests
-        log::info!("Connectivity Tests:");
+        tracing::info!("Connectivity Tests:");
         for (test, result) in &self.network.connectivity_tests {
             let status = if *result { "Success" } else { "Failed" };
-            log::info!("  - {}: {}", test, status);
+            tracing::info!("  - {}: {}", test, status);
         }
         
         // Log database status
-        log::info!("Database Status:");
-        log::info!("  - Database exists: {}", self.database.database_exists);
-        log::info!("  - Database accessible: {}", self.database.database_accessible);
-        log::info!("  - Integrity status: {:?}", self.database.integrity_status);
+        tracing::info!("Database Status:");
+        tracing::info!("  - Database exists: {}", self.database.database_exists);
+        tracing::info!("  - Database accessible: {}", self.database.database_accessible);
+        tracing::info!("  - Integrity status: {:?}", self.database.integrity_status);
         if let Some(count) = self.database.media_file_count {
-            log::info!("  - Media files: {}", count);
+            tracing::info!("  - Media files: {}", count);
         }
         
         // Log filesystem status
-        log::info!("Filesystem Status:");
-        log::info!("  - Config directory: {} (accessible: {})", 
+        tracing::info!("Filesystem Status:");
+        tracing::info!("  - Config directory: {} (accessible: {})", 
             self.filesystem.config_directory.path.display(),
             self.filesystem.config_directory.accessible
         );
-        log::info!("  - Monitored directories: {}", self.filesystem.monitored_directories.len());
+        tracing::info!("  - Monitored directories: {}", self.filesystem.monitored_directories.len());
         
         // Log configuration status
-        log::info!("Configuration Status:");
-        log::info!("  - Config file exists: {}", self.configuration.config_file_exists);
-        log::info!("  - Config file valid: {}", self.configuration.config_file_valid);
-        log::info!("  - Hot reload enabled: {}", self.configuration.hot_reload_enabled);
+        tracing::info!("Configuration Status:");
+        tracing::info!("  - Config file exists: {}", self.configuration.config_file_exists);
+        tracing::info!("  - Config file valid: {}", self.configuration.config_file_valid);
+        tracing::info!("  - Hot reload enabled: {}", self.configuration.hot_reload_enabled);
         if !self.configuration.config_errors.is_empty() {
-            log::warn!("  - Configuration errors: {:?}", self.configuration.config_errors);
+            tracing::warn!("  - Configuration errors: {:?}", self.configuration.config_errors);
         }
         
         // Log system information
-        log::info!("System Information:");
-        log::info!("  - Process ID: {}", self.system.process_info.pid);
+        tracing::info!("System Information:");
+        tracing::info!("  - Process ID: {}", self.system.process_info.pid);
         if let Some(cpu_count) = self.system.cpu_count {
-            log::info!("  - CPU cores: {}", cpu_count);
+            tracing::info!("  - CPU cores: {}", cpu_count);
         }
         
-        log::info!("=== End Diagnostics ===");
+        tracing::info!("=== End Diagnostics ===");
     }
     
     /// Log diagnostic information for debugging
     pub fn log_debug_diagnostics(&self) {
-        log::debug!("=== Detailed Diagnostic Information ===");
+        tracing::debug!("=== Detailed Diagnostic Information ===");
         
         // Log all network interfaces
-        log::debug!("Network Interfaces:");
+        tracing::debug!("Network Interfaces:");
         for iface in &self.network.interfaces {
-            log::debug!("  - {} ({}): {} [{}] up={} multicast={}", 
+            tracing::debug!("  - {} ({}): {} [{}] up={} multicast={}", 
                 iface.name, 
                 iface.interface_type,
                 iface.ip_address,
@@ -524,15 +524,15 @@ impl DiagnosticInfo {
         }
         
         // Log platform-specific metadata
-        log::debug!("Platform Metadata:");
+        tracing::debug!("Platform Metadata:");
         for (key, value) in &self.platform.platform_specific {
-            log::debug!("  - {}: {}", key, value);
+            tracing::debug!("  - {}: {}", key, value);
         }
         
         // Log directory details
-        log::debug!("Directory Details:");
+        tracing::debug!("Directory Details:");
         for dir in &self.filesystem.monitored_directories {
-            log::debug!("  - {}: exists={} readable={} writable={} files={:?}", 
+            tracing::debug!("  - {}: exists={} readable={} writable={} files={:?}", 
                 dir.path.display(),
                 dir.exists,
                 dir.readable,
@@ -541,7 +541,7 @@ impl DiagnosticInfo {
             );
         }
         
-        log::debug!("=== End Detailed Diagnostics ===");
+        tracing::debug!("=== End Detailed Diagnostics ===");
     }
     
     /// Export diagnostics to JSON for support purposes
@@ -562,7 +562,7 @@ pub struct StartupDiagnostics;
 impl StartupDiagnostics {
     /// Perform critical startup checks
     pub async fn perform_startup_checks() -> Result<(), PlatformError> {
-        log::info!("Performing startup diagnostic checks...");
+        tracing::info!("Performing startup diagnostic checks...");
         
         // Check platform compatibility
         Self::check_platform_compatibility().await?;
@@ -576,7 +576,7 @@ impl StartupDiagnostics {
         // Check system resources
         Self::check_system_resources().await?;
         
-        log::info!("All startup diagnostic checks passed");
+        tracing::info!("All startup diagnostic checks passed");
         Ok(())
     }
     
@@ -586,13 +586,13 @@ impl StartupDiagnostics {
         // Check if platform is supported
         match platform_info.os_type {
             OsType::Windows | OsType::MacOS | OsType::Linux => {
-                log::info!("Platform {} is supported", platform_info.os_type.display_name());
+                tracing::info!("Platform {} is supported", platform_info.os_type.display_name());
             }
         }
         
         // Check for required capabilities
         if !platform_info.capabilities.supports_multicast {
-            log::warn!("Platform does not support multicast - DLNA discovery may be limited");
+            tracing::warn!("Platform does not support multicast - DLNA discovery may be limited");
         }
         
         Ok(())
@@ -608,17 +608,17 @@ impl StartupDiagnostics {
             .collect();
         
         if usable_interfaces.is_empty() {
-            log::error!("No usable network interfaces found");
+            tracing::error!("No usable network interfaces found");
             return Err(PlatformError::NetworkConfig(
                 "No active network interfaces available for DLNA service".to_string()
             ));
         }
         
-        log::info!("Found {} usable network interface(s)", usable_interfaces.len());
+        tracing::info!("Found {} usable network interface(s)", usable_interfaces.len());
         
         // Test port availability
         if !DiagnosticInfo::test_port_availability(1900).await {
-            log::warn!("Port 1900 is not available - will use alternative port");
+            tracing::warn!("Port 1900 is not available - will use alternative port");
         }
         
         Ok(())
@@ -631,11 +631,11 @@ impl StartupDiagnostics {
         
         match std::fs::create_dir_all(&test_dir) {
             Ok(_) => {
-                log::debug!("Filesystem write test passed");
+                tracing::debug!("Filesystem write test passed");
                 let _ = std::fs::remove_dir_all(&test_dir);
             }
             Err(e) => {
-                log::error!("Filesystem write test failed: {}", e);
+                tracing::error!("Filesystem write test failed: {}", e);
                 return Err(PlatformError::FileSystemAccess(
                     format!("Cannot create directories: {}", e)
                 ));
@@ -649,7 +649,7 @@ impl StartupDiagnostics {
         // Check available memory (basic check)
         // TODO: Implement more comprehensive resource checks
         
-        log::debug!("System resource checks passed");
+        tracing::debug!("System resource checks passed");
         Ok(())
     }
 }
@@ -680,8 +680,8 @@ mod tests {
         let result = StartupDiagnostics::perform_startup_checks().await;
         // This might fail in some test environments, so we just check it doesn't panic
         match result {
-            Ok(_) => log::info!("Startup diagnostics passed"),
-            Err(e) => log::warn!("Startup diagnostics failed: {}", e),
+            Ok(_) => tracing::info!("Startup diagnostics passed"),
+            Err(e) => tracing::warn!("Startup diagnostics failed: {}", e),
         }
     }
     

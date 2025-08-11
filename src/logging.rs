@@ -53,7 +53,7 @@ pub async fn log_startup_info() -> Result<(), PlatformError> {
     diagnostics.log_startup_diagnostics();
     
     // Log debug diagnostics if debug logging is enabled
-    if log::log_enabled!(log::Level::Debug) {
+    if tracing::enabled!(tracing::Level::DEBUG) {
         diagnostics.log_debug_diagnostics();
     }
     

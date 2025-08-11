@@ -108,6 +108,11 @@ impl MediaScanner {
     
     /// Perform a full scan of a directory, updating the database with new/changed files
     pub async fn scan_directory(&self, directory: &Path) -> Result<ScanResult> {
+        self.scan_directory_with_existing_files(directory, None).await
+    }
+    
+    /// Internal method that allows passing existing files to avoid repeated database queries during recursive scans
+    async fn scan_directory_with_existing_files(&self, directory: &Path, all_existing_files: Option<&[DbMediaFile]>) -> Result<ScanResult> {
         let normalized_dir = self.filesystem_manager.normalize_path(directory);
         
         // Validate the directory path
@@ -121,9 +126,21 @@ impl MediaScanner {
         }
         
         // Get existing files from database for this directory
-        let existing_files = self.database_manager
-            .get_files_in_directory(&normalized_dir)
-            .await?;
+        let existing_files = if let Some(all_files) = all_existing_files {
+            // Filter existing files to only those in this directory
+            all_files.iter()
+                .filter(|file| {
+                    let file_parent = file.path.parent().unwrap_or_else(|| std::path::Path::new(""));
+                    let normalized_file_parent = self.filesystem_manager.normalize_path(file_parent);
+                    normalized_file_parent == normalized_dir
+                })
+                .cloned()
+                .collect()
+        } else {
+            self.database_manager
+                .get_files_in_directory(&normalized_dir)
+                .await?
+        };
         
         // Scan the file system for current files
         let fs_files = self.filesystem_manager
@@ -131,13 +148,11 @@ impl MediaScanner {
             .await
             .map_err(|e| anyhow::anyhow!("File system scan failed: {}", e))?;
         
-        // Convert and normalize filesystem MediaFiles to database MediaFiles
+        // Convert filesystem MediaFiles to database MediaFiles
+        // Note: Path normalization will be handled in perform_incremental_update
         let current_files: Vec<DbMediaFile> = fs_files
             .into_iter()
-            .map(|mut fs_file| {
-                fs_file.path = self.filesystem_manager.normalize_path(&fs_file.path);
-                self.convert_fs_to_db_media_file(fs_file)
-            })
+            .map(|fs_file| self.convert_fs_to_db_media_file(fs_file))
             .collect();
         
         // Perform incremental update
@@ -171,25 +186,52 @@ impl MediaScanner {
     ) -> Result<ScanResult> {
         let mut result = ScanResult::new();
         
-        // Create lookup maps for efficient comparison, ensuring keys are normalized.
-        let existing_map: std::collections::HashMap<PathBuf, DbMediaFile> = existing_files
-            .into_iter()
-            .map(|f| (self.filesystem_manager.normalize_path(&f.path), f))
+        // Create lookup maps for efficient comparison
+        // Use both original and normalized paths to handle legacy database entries
+        let mut existing_by_original: std::collections::HashMap<PathBuf, DbMediaFile> = std::collections::HashMap::new();
+        let mut existing_by_normalized: std::collections::HashMap<PathBuf, DbMediaFile> = std::collections::HashMap::new();
+        
+        for existing_file in existing_files {
+            let normalized_path = self.filesystem_manager.normalize_path(&existing_file.path);
+            
+
+            
+            existing_by_original.insert(existing_file.path.clone(), existing_file.clone());
+            existing_by_normalized.insert(normalized_path, existing_file);
+        }
+        
+        // Current files paths - normalize for consistent comparison
+        let current_normalized: std::collections::HashMap<PathBuf, DbMediaFile> = current_files
+            .iter()
+            .map(|f| {
+                let normalized_path = self.filesystem_manager.normalize_path(&f.path);
+                
+
+                
+                (normalized_path, f.clone())
+            })
             .collect();
         
-        let current_paths: HashSet<PathBuf> = current_files
-            .iter()
-            .map(|f| f.path.clone())
-            .collect();
+        let current_paths: HashSet<PathBuf> = current_normalized.keys().cloned().collect();
+        
+
         
         // Process current files - add new ones or update changed ones
-        for current_file in current_files {
-            // The path of current_file is already normalized from the scan_directory method.
-            match existing_map.get(&current_file.path) {
+        for (normalized_current_path, current_file) in &current_normalized {
+            // Try to find existing file by normalized path first, then by original path
+            let existing_file = existing_by_normalized.get(normalized_current_path)
+                .or_else(|| existing_by_original.get(&current_file.path));
+            
+            match existing_file {
                 Some(existing_file) => {
                     // File exists in database, check if it needs updating
-                    if self.file_needs_update(existing_file, &current_file) {
+                    if self.file_needs_update(existing_file, current_file) {
+                        tracing::debug!("File needs update: {} (modified: {:?} vs {:?}, size: {} vs {})", 
+                            existing_file.path.display(), 
+                            existing_file.modified, current_file.modified,
+                            existing_file.size, current_file.size);
                         let mut updated_file = current_file.clone();
+                        updated_file.path = normalized_current_path.clone(); // Use normalized path
                         updated_file.id = existing_file.id; // Preserve database ID
                         updated_file.created_at = existing_file.created_at; // Preserve creation time
                         updated_file.updated_at = SystemTime::now();
@@ -197,24 +239,39 @@ impl MediaScanner {
                         self.database_manager.update_media_file(&updated_file).await?;
                         result.updated_files.push(updated_file);
                     } else {
-                        result.unchanged_files.push(existing_file.clone());
+                        // Check if the existing file path needs normalization
+                        let existing_normalized = self.filesystem_manager.normalize_path(&existing_file.path);
+                        if existing_file.path != existing_normalized {
+                            // Path needs normalization - update it in the database
+                            tracing::debug!("Normalizing path: '{}' -> '{}'", existing_file.path.display(), existing_normalized.display());
+                            let mut normalized_existing = existing_file.clone();
+                            normalized_existing.path = existing_normalized;
+                            normalized_existing.updated_at = SystemTime::now();
+                            
+                            self.database_manager.update_media_file(&normalized_existing).await?;
+                            result.updated_files.push(normalized_existing);
+                        } else {
+                            result.unchanged_files.push(existing_file.clone());
+                        }
                     }
                 }
                 None => {
-                    // New file, add to database
-                    let id = self.database_manager.store_media_file(&current_file).await?;
-                    let mut new_file = current_file.clone();
-                    new_file.id = Some(id);
-                    result.new_files.push(new_file);
+                    // New file, add to database with normalized path
+                    let mut normalized_file = current_file.clone();
+                    normalized_file.path = normalized_current_path.clone();
+                    let id = self.database_manager.store_media_file(&normalized_file).await?;
+                    normalized_file.id = Some(id);
+                    result.new_files.push(normalized_file);
                 }
             }
         }
         
         // Find files that were removed from the file system
-        for (existing_path, existing_file) in existing_map {
-            if !current_paths.contains(&existing_path) {
-                // File was removed from file system, remove from database
-                if self.database_manager.remove_media_file(&existing_path).await? {
+        // Check both normalized and original paths to handle legacy entries
+        for (normalized_existing_path, existing_file) in existing_by_normalized {
+            if !current_paths.contains(&normalized_existing_path) {
+                // File was removed from file system, remove from database using original path
+                if self.database_manager.remove_media_file(&existing_file.path).await? {
                     result.removed_files.push(existing_file);
                 }
             }
@@ -227,11 +284,29 @@ impl MediaScanner {
     
     /// Check if a file needs to be updated in the database
     fn file_needs_update(&self, existing: &DbMediaFile, current: &DbMediaFile) -> bool {
-        // Compare modification times and file sizes
-        existing.modified != current.modified || 
-        existing.size != current.size ||
-        existing.mime_type != current.mime_type ||
-        existing.filename != current.filename
+        // Compare file sizes first (most reliable)
+        if existing.size != current.size {
+            return true;
+        }
+        
+        // Compare MIME type and filename
+        if existing.mime_type != current.mime_type || existing.filename != current.filename {
+            return true;
+        }
+        
+        // Compare modification times with tolerance for Windows timestamp precision issues
+        // Windows can have different precision depending on filesystem and access method
+        let time_diff = if existing.modified > current.modified {
+            existing.modified.duration_since(current.modified)
+        } else {
+            current.modified.duration_since(existing.modified)
+        };
+        
+        // Allow up to 10 seconds difference to account for timestamp precision issues
+        match time_diff {
+            Ok(diff) => diff.as_secs() > 10,
+            Err(_) => true, // If we can't calculate the difference, assume it needs updating
+        }
     }
     
     /// Scan multiple directories and return combined results
@@ -258,12 +333,17 @@ impl MediaScanner {
     
     /// Perform a recursive scan of a directory and its subdirectories
     pub async fn scan_directory_recursive(&self, directory: &Path) -> Result<ScanResult> {
+        let normalized_root = self.filesystem_manager.normalize_path(directory);
+        
+        // Get all existing files from database once at the beginning
+        let all_existing_files = self.database_manager.get_all_media_files().await?;
+        
         let mut combined_result = ScanResult::new();
-        let mut directories_to_scan = vec![directory.to_path_buf()];
+        let mut directories_to_scan = vec![normalized_root.clone()];
         
         while let Some(current_dir) = directories_to_scan.pop() {
-            // Scan current directory
-            match self.scan_directory(&current_dir).await {
+            // Scan current directory with the pre-loaded existing files
+            match self.scan_directory_with_existing_files(&current_dir, Some(&all_existing_files)).await {
                 Ok(result) => {
                     combined_result.merge(result);
                 }

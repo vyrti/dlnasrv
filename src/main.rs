@@ -991,41 +991,90 @@ async fn handle_file_system_event(
             info!("Path deleted: {}", path.display());
             
             // First, try to remove as a single file
-            let single_file_removed = database.remove_media_file(&path).await?;
+            let single_file_removed = match database.remove_media_file(&path).await {
+                Ok(removed) => {
+                    if removed {
+                        info!("Removed single file from database: {}", path.display());
+                    } else {
+                        info!("Single file not found in database: {}", path.display());
+                    }
+                    removed
+                }
+                Err(e) => {
+                    warn!("Error removing single file from database {}: {}", path.display(), e);
+                    false
+                }
+            };
             
             // Also check for files that were in this directory path
-            let all_files = database.get_all_media_files().await?;
+            let all_files = match database.get_all_media_files().await {
+                Ok(files) => files,
+                Err(e) => {
+                    warn!("Error getting all media files: {}", e);
+                    return Ok(());
+                }
+            };
+            
+            // Normalize paths for case-insensitive comparison on Windows
+            let normalized_deleted_path = path.to_string_lossy().to_lowercase();
             let files_in_deleted_path: Vec<_> = all_files
                 .iter()
-                .filter(|file| file.path.starts_with(&path))
+                .filter(|file| {
+                    let normalized_file_path = file.path.to_string_lossy().to_lowercase();
+                    let matches = normalized_file_path.starts_with(&normalized_deleted_path);
+                    if matches {
+                        info!("Found file in deleted path: {} starts with {}", file.path.display(), path.display());
+                    }
+                    matches
+                })
                 .collect();
             
             let mut total_removed = if single_file_removed { 1 } else { 0 };
             
             if !files_in_deleted_path.is_empty() {
-                info!("Removing {} media files from deleted directory: {}", files_in_deleted_path.len(), path.display());
+                info!("Found {} media files in deleted directory: {}", files_in_deleted_path.len(), path.display());
                 
                 for file in &files_in_deleted_path {
-                    if database.remove_media_file(&file.path).await? {
-                        total_removed += 1;
+                    match database.remove_media_file(&file.path).await {
+                        Ok(true) => {
+                            total_removed += 1;
+                            info!("Removed file from database: {}", file.path.display());
+                        }
+                        Ok(false) => {
+                            info!("File not found in database: {}", file.path.display());
+                        }
+                        Err(e) => {
+                            warn!("Error removing file from database {}: {}", file.path.display(), e);
+                        }
                     }
                 }
+            } else {
+                info!("No files found in deleted path: {}", path.display());
+                // Debug: show some database paths for comparison
+                let sample_paths: Vec<_> = all_files.iter().take(5).map(|f| f.path.display().to_string()).collect();
+                info!("Sample database paths: {:?}", sample_paths);
             }
             
-            // Remove from in-memory cache
+            // Remove from in-memory cache (case-insensitive on Windows)
             let mut files = media_files.write().await;
             let initial_count = files.len();
-            files.retain(|f| !f.path.starts_with(&path));
+            files.retain(|f| {
+                let normalized_file_path = f.path.to_string_lossy().to_lowercase();
+                !normalized_file_path.starts_with(&normalized_deleted_path)
+            });
             let removed_from_cache = initial_count - files.len();
             
-            if total_removed > 0 {
-                info!("Removed {} media files from database and {} from cache for deleted path: {}", 
+            info!("Cache cleanup: removed {} files from in-memory cache", removed_from_cache);
+            
+            if total_removed > 0 || removed_from_cache > 0 {
+                info!("Total cleanup: {} files from database, {} from cache for path: {}", 
                       total_removed, removed_from_cache, path.display());
                 
                 // Increment update ID to notify DLNA clients
                 increment_content_update_id(app_state);
+                info!("Notified DLNA clients of content change");
             } else {
-                debug!("No media files found to remove for deleted path: {}", path.display());
+                info!("No files were removed for deleted path: {}", path.display());
             }
         }
         

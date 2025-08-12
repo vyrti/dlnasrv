@@ -87,7 +87,7 @@ pub struct DatabaseConfig {
 
 impl AppConfig {
     /// Create configuration from command line arguments (compatibility with old interface)
-    pub async fn from_args() -> Result<Self> {
+    pub async fn from_args() -> Result<(Self, bool, Option<String>)> {
         use clap::Parser;
         
         #[derive(Parser, Debug)]
@@ -103,9 +103,57 @@ impl AppConfig {
             /// The friendly name for the DLNA server
             #[arg(short, long, default_value = "OpenDLNA Server")]
             name: String,
+
+            /// Enable debug logging
+            #[arg(long)]
+            debug: bool,
+
+            /// Path to configuration file
+            #[arg(short, long)]
+            config: Option<String>,
         }
         
         let args = Args::parse();
+        
+        // If config file is provided, load from there first
+        if let Some(config_path) = &args.config {
+            let config_path = PathBuf::from(config_path);
+            if !config_path.exists() {
+                anyhow::bail!("Configuration file does not exist: {}", config_path.display());
+            }
+            
+            let mut config = Self::load_from_file(&config_path)?;
+            
+            // Override config file settings with command line arguments
+            if let Some(media_dir) = &args.media_dir {
+                let media_dir = PathBuf::from(media_dir);
+                if !media_dir.exists() {
+                    anyhow::bail!("Media directory does not exist: {}", media_dir.display());
+                }
+                if !media_dir.is_dir() {
+                    anyhow::bail!("Media path is not a directory: {}", media_dir.display());
+                }
+                
+                config.media.directories = vec![
+                    MonitoredDirectoryConfig {
+                        path: media_dir.to_string_lossy().to_string(),
+                        recursive: true,
+                        extensions: None,
+                        exclude_patterns: None,
+                    }
+                ];
+            }
+            
+            if let Some(port) = args.port {
+                config.server.port = port;
+            }
+            
+            if args.name != "OpenDLNA Server" {
+                config.server.name = args.name;
+            }
+            
+            return Ok((config, args.debug, args.config));
+        }
         
         // If no media directory provided, return error to indicate no args
         let media_dir_str = args.media_dir.ok_or_else(|| {
@@ -148,7 +196,7 @@ impl AppConfig {
         
         tracing::info!("Using command line media directory: {}", media_dir.display());
         
-        Ok(config)
+        Ok((config, args.debug, args.config))
     }
 
     /// Get the primary media directory (for compatibility)

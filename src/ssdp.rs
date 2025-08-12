@@ -3,7 +3,7 @@ use crate::platform::network::{NetworkManager, SsdpConfig, PlatformNetworkManage
 use anyhow::Result;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time::interval;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 const SSDP_MULTICAST_ADDR: &str = "239.255.255.250";
 const SSDP_PORT: u16 = 1900;
@@ -107,8 +107,8 @@ async fn ssdp_search_responder(state: AppState, network_manager: Arc<PlatformNet
                 let request = String::from_utf8_lossy(&buf[..len]);
 
                 if request.contains("M-SEARCH") {
-                    info!("Received M-SEARCH from {}", addr);
-                    info!("M-SEARCH request content: {}", request.trim());
+                    debug!("Received M-SEARCH from {}", addr);
+                    debug!("M-SEARCH request content: {}", request.trim());
                     
                     // Check for various SSDP discovery patterns and determine response types
                     let mut response_types = Vec::new();
@@ -130,20 +130,20 @@ async fn ssdp_search_responder(state: AppState, network_manager: Arc<PlatformNet
                     }
                     
                     if !response_types.is_empty() {
-                        info!("Sending {} SSDP response(s) to {} for types: {:?}", response_types.len(), addr, response_types);
+                        debug!("Sending {} SSDP response(s) to {} for types: {:?}", response_types.len(), addr, response_types);
                         
                         let mut all_responses_sent = true;
                         let response_count = response_types.len();
                         for response_type in response_types {
                             let response = create_ssdp_response(&state, socket_port, response_type).await;
-                            info!("Sending SSDP response to {} ({}): {}", addr, response_type, response.trim());
+                            debug!("Sending SSDP response to {} ({}): {}", addr, response_type, response.trim());
                             
                             // Retry response sending with exponential backoff
                             let mut response_sent = false;
                             for retry in 0..3 {
                                 match socket.send_to(response.as_bytes(), addr).await {
                                     Ok(_) => {
-                                        info!("Successfully sent M-SEARCH response to {} for {} (attempt {})", addr, response_type, retry + 1);
+                                        debug!("Successfully sent M-SEARCH response to {} for {} (attempt {})", addr, response_type, retry + 1);
                                         response_sent = true;
                                         break;
                                     }

@@ -13,10 +13,52 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+/// Parse early command line arguments to get debug flag and config file path
+/// This is needed before logging initialization
+fn parse_early_args() -> (bool, Option<String>) {
+    use clap::Parser;
+    
+    #[derive(Parser, Debug)]
+    #[command(author, version, about, long_about = None)]
+    struct EarlyArgs {
+        /// The directory containing media files to serve
+        _media_dir: Option<String>,
+
+        /// The network port to listen on
+        #[arg(short, long)]
+        _port: Option<u16>,
+
+        /// The friendly name for the DLNA server
+        #[arg(short, long, default_value = "OpenDLNA Server")]
+        _name: String,
+
+        /// Enable debug logging
+        #[arg(long)]
+        debug: bool,
+
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+    }
+    
+    // Parse args, but ignore errors since we'll parse them again later
+    match EarlyArgs::try_parse() {
+        Ok(args) => (args.debug, args.config),
+        Err(_) => (false, None), // Default to no debug and no config file
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging first
-    logging::init_logging().context("Failed to initialize logging")?;
+    // Parse command line arguments first to get debug flag
+    let (debug_enabled, config_file_path) = parse_early_args();
+    
+    // Initialize logging with debug flag
+    if debug_enabled {
+        logging::init_logging_with_debug(true).context("Failed to initialize debug logging")?;
+    } else {
+        logging::init_logging().context("Failed to initialize logging")?;
+    }
 
     info!("Starting OpenDLNA Server...");
 
@@ -546,8 +588,16 @@ async fn initialize_configuration(_platform_info: &PlatformInfo) -> anyhow::Resu
     
     // First, try to load from command line arguments
     match AppConfig::from_args().await {
-        Ok(config) => {
-            info!("Using configuration from command line arguments");
+        Ok((config, debug, config_path)) => {
+            if let Some(path) = config_path {
+                info!("Using configuration from file: {}", path);
+            } else {
+                info!("Using configuration from command line arguments");
+            }
+            
+            if debug {
+                debug!("Debug logging enabled via command line");
+            }
             
             // Apply platform-specific defaults for any missing values
             let mut config = config;
@@ -558,7 +608,7 @@ async fn initialize_configuration(_platform_info: &PlatformInfo) -> anyhow::Resu
             config.validate_for_platform()
                 .context("Command line configuration validation failed")?;
             
-            info!("Command line configuration validated successfully");
+            info!("Configuration validated successfully");
             info!("Server will listen on: {}:{}", config.server.interface, config.server.port);
             info!("SSDP will use port: {}", config.network.ssdp_port);
             info!("Monitoring {} director(ies) for media files", config.media.directories.len());
@@ -570,7 +620,7 @@ async fn initialize_configuration(_platform_info: &PlatformInfo) -> anyhow::Resu
             return Ok(config);
         }
         Err(e) => {
-            info!("No valid command line arguments provided: {}", e);
+            debug!("No valid command line arguments provided: {}", e);
             info!("Falling back to configuration file or platform defaults");
         }
     }

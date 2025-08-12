@@ -2,7 +2,7 @@
 use super::{InterfaceType, NetworkInterface, PlatformError, PlatformResult};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use windows::Win32::NetworkManagement::IpHelper::{
     GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH, GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST,
     GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_DNS_SERVER, IF_TYPE_ETHERNET_CSMACD,
@@ -193,7 +193,7 @@ fn detect_network_interfaces_sync() -> PlatformResult<Vec<NetworkInterface>> {
         ));
     }
     
-    info!(
+    debug!(
         "Successfully detected {} network interface(s) via Windows API.",
         interfaces.len()
     );

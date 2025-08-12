@@ -6,13 +6,20 @@ use crate::platform::diagnostics::{DiagnosticInfo, StartupDiagnostics};
 
 /// Initialize logging with platform-specific configuration
 pub fn init_logging() -> Result<(), PlatformError> {
-    init_logging_with_options(None, None)
+    init_logging_with_options(None, None, false)
+}
+
+/// Initialize logging with debug flag
+pub fn init_logging_with_debug(debug: bool) -> Result<(), PlatformError> {
+    let log_level = if debug { "debug" } else { "info" };
+    init_logging_with_options(Some(log_level), None, debug)
 }
 
 /// Initialize logging with platform-specific configuration and options
-pub fn init_logging_with_options(log_level: Option<&str>, log_file: Option<PathBuf>) -> Result<(), PlatformError> {
+pub fn init_logging_with_options(log_level: Option<&str>, log_file: Option<PathBuf>, debug: bool) -> Result<(), PlatformError> {
+    let default_level = if debug { "debug" } else { "info" };
     let filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(log_level.unwrap_or("info")))
+        .or_else(|_| EnvFilter::try_new(log_level.unwrap_or(default_level)))
         .map_err(|e| PlatformError::Configuration(
             crate::platform::ConfigurationError::ValidationFailed { 
                 reason: format!("Invalid log level: {}", e) 
@@ -37,7 +44,7 @@ pub fn init_logging_with_options(log_level: Option<&str>, log_file: Option<PathB
 
     subscriber.init();
     
-    info!("Logging initialized with level: {}", log_level.unwrap_or("info"));
+    info!("Logging initialized with level: {}", log_level.unwrap_or(default_level));
     Ok(())
 }
 

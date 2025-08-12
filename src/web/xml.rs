@@ -113,6 +113,8 @@ pub fn generate_scpd_xml() -> String {
         <stateVariable sendEvents="no"><name>A_ARG_TYPE_SortCriteria</name><dataType>string</dataType></stateVariable>
         <stateVariable sendEvents="no"><name>A_ARG_TYPE_Result</name><dataType>string</dataType></stateVariable>
         <stateVariable sendEvents="no"><name>A_ARG_TYPE_UpdateID</name><dataType>ui4</dataType></stateVariable>
+        <stateVariable sendEvents="yes"><name>SystemUpdateID</name><dataType>ui4</dataType></stateVariable>
+        <stateVariable sendEvents="yes"><name>ContainerUpdateIDs</name><dataType>string</dataType></stateVariable>
     </serviceStateTable>
 </scpd>"#.to_string()
 }
@@ -243,6 +245,8 @@ pub fn generate_browse_response(
     didl.push_str("</DIDL-Lite>");
     let total_matches = number_returned;
 
+    let update_id = state.content_update_id.load(std::sync::atomic::Ordering::Relaxed);
+    
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
@@ -251,12 +255,13 @@ pub fn generate_browse_response(
             <Result>{}</Result>
             <NumberReturned>{}</NumberReturned>
             <TotalMatches>{}</TotalMatches>
-            <UpdateID>0</UpdateID>
+            <UpdateID>{}</UpdateID>
         </u:BrowseResponse>
     </s:Body>
 </s:Envelope>"#,
         xml_escape(&didl),
         number_returned,
-        total_matches
+        total_matches,
+        update_id
     )
 }

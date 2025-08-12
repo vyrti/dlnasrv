@@ -16,6 +16,10 @@ pub fn create_router(state: AppState) -> Router {
             "/control/ContentDirectory",
             get(handlers::content_directory_control).post(handlers::content_directory_control),
         )
+        .route(
+            "/event/ContentDirectory",
+            axum::routing::any(handlers::content_directory_subscribe),
+        )
         // Corrected route syntax from "/media/:id" to "/media/{id}"
         .route("/media/{id}", get(handlers::serve_media))
         .with_state(state)

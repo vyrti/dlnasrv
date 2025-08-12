@@ -81,7 +81,7 @@ impl CrossPlatformWatcher {
             event_receiver: Arc::new(RwLock::new(Some(event_receiver))),
             watched_paths: Arc::new(RwLock::new(HashSet::new())),
             media_extensions,
-            debounce_duration: Duration::from_millis(500), // 500ms debounce
+            debounce_duration: Duration::from_millis(100), // 100ms debounce
         }
     }
 
@@ -105,12 +105,13 @@ impl CrossPlatformWatcher {
                     for path in &event.event.paths {
                         if path.is_dir() {
                             // Handle directory creation - scan for media files
-                            debug!("Directory created: {:?}", path);
-                            // We'll handle this in the integration layer by triggering a scan
+                            info!("Directory created (detected by watcher): {:?}", path);
                             fs_events.push(FileSystemEvent::Created(path.clone()));
                         } else if self.is_media_file(path) {
-                            debug!("Media file created: {:?}", path);
+                            info!("Media file created (detected by watcher): {:?}", path);
                             fs_events.push(FileSystemEvent::Created(path.clone()));
+                        } else {
+                            debug!("Non-media file created, ignoring: {:?}", path);
                         }
                     }
                 }
@@ -127,14 +128,10 @@ impl CrossPlatformWatcher {
                 }
                 notify::EventKind::Remove(_) => {
                     for path in &event.event.paths {
-                        if path.is_dir() {
-                            // Handle directory removal
-                            debug!("Directory deleted: {:?}", path);
-                            fs_events.push(FileSystemEvent::Deleted(path.clone()));
-                        } else if self.is_media_file(path) {
-                            debug!("Media file deleted: {:?}", path);
-                            fs_events.push(FileSystemEvent::Deleted(path.clone()));
-                        }
+                        // Since the path is deleted, we can't check if it was a directory
+                        // We'll send all deletion events and let the handler figure it out
+                        info!("Path deleted (detected by watcher): {:?}", path);
+                        fs_events.push(FileSystemEvent::Deleted(path.clone()));
                     }
                 }
                 notify::EventKind::Other => {
@@ -176,34 +173,55 @@ impl CrossPlatformWatcher {
             move |result: DebounceEventResult| {
                 match result {
                     Ok(events) => {
+                        if !events.is_empty() {
+                            info!("Watcher callback triggered with {} events", events.len());
+                            for event in &events {
+                                info!("  Raw event: {:?} for paths: {:?}", event.event.kind, event.paths);
+                            }
+                        }
+                        
                         // Filter events for media files OR directories
                         let relevant_events: Vec<_> = events.into_iter()
                             .filter(|event| {
                                 event.paths.iter().any(|path| {
-                                    // Include directories and media files
+                                    // For deletion events, we can't check if path.is_dir() since it's gone
+                                    // So we include all deletion events
+                                    if matches!(event.event.kind, notify::EventKind::Remove(_)) {
+                                        info!("Including deletion event for path: {:?}", path);
+                                        return true;
+                                    }
+                                    
+                                    // Include directories and media files for other events
                                     if path.is_dir() {
+                                        info!("Including directory event for path: {:?}", path);
                                         return true;
                                     }
                                     
                                     // Include media files
                                     if let Some(extension) = path.extension() {
                                         if let Some(ext_str) = extension.to_str() {
-                                            return media_extensions.contains(&ext_str.to_lowercase());
+                                            if media_extensions.contains(&ext_str.to_lowercase()) {
+                                                info!("Including media file event for path: {:?}", path);
+                                                return true;
+                                            }
                                         }
                                     }
+                                    
+                                    debug!("Excluding non-media file event for path: {:?}", path);
                                     false
                                 })
                             })
                             .collect();
 
                         if !relevant_events.is_empty() {
+                            info!("Processing {} relevant events", relevant_events.len());
                             let watcher = CrossPlatformWatcher {
                                 debouncer: Arc::new(RwLock::new(None)),
                                 event_sender: event_sender.clone(),
                                 event_receiver: Arc::new(RwLock::new(None)),
                                 watched_paths: Arc::new(RwLock::new(HashSet::new())),
                                 media_extensions: media_extensions.clone(),
-                                debounce_duration: Duration::from_millis(500),
+                                debounce_duration: Duration::from_millis(100),
                             };
                             
                             let fs_events = watcher.convert_events(relevant_events);
@@ -227,6 +245,7 @@ impl CrossPlatformWatcher {
         *debouncer_guard = Some(debouncer);
         
         info!("File system watcher initialized with {}ms debounce", self.debounce_duration.as_millis());
+        info!("Watcher callback registered and ready to receive events");
         Ok(())
     }
 }
@@ -260,6 +279,13 @@ impl FileSystemWatcher for CrossPlatformWatcher {
                     Ok(()) => {
                         watched_paths.insert(directory.clone());
                         info!("Started watching directory: {:?}", directory);
+                        
+                        // Test if directory is accessible
+                        if directory.exists() && directory.is_dir() {
+                            info!("Directory exists and is accessible: {:?}", directory);
+                        } else {
+                            warn!("Directory may not be accessible: {:?}", directory);
+                        }
                     }
                     Err(e) => {
                         error!("Failed to watch directory {:?}: {}", directory, e);

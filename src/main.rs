@@ -77,10 +77,11 @@ async fn main() -> anyhow::Result<()> {
         media_files: media_files.clone(),
         database: database.clone(),
         platform_info: platform_info.clone(),
+        content_update_id: Arc::new(std::sync::atomic::AtomicU32::new(1)),
     };
 
     // Start file system monitoring
-    if let Err(e) = start_file_monitoring(file_watcher.clone(), &config, database.clone(), media_files.clone()).await {
+    if let Err(e) = start_file_monitoring(file_watcher.clone(), app_state.clone()).await {
         warn!("Failed to start file system monitoring: {}", e);
         warn!("Continuing without real-time file monitoring");
     }
@@ -699,6 +700,37 @@ async fn initialize_file_watcher(config: &AppConfig, _database: Arc<dyn Database
     Ok(watcher)
 }
 
+/// Validate cached files and remove any that no longer exist on disk
+async fn validate_and_cleanup_deleted_files(
+    database: Arc<dyn DatabaseManager>,
+    cached_files: Vec<database::MediaFile>,
+) -> anyhow::Result<Vec<database::MediaFile>> {
+    info!("Validating {} cached media files...", cached_files.len());
+    
+    let mut valid_files = Vec::new();
+    let mut removed_count = 0;
+    
+    for file in cached_files {
+        if file.path.exists() {
+            valid_files.push(file);
+        } else {
+            info!("Removing deleted file from database: {}", file.path.display());
+            if database.remove_media_file(&file.path).await? {
+                removed_count += 1;
+            }
+        }
+    }
+    
+    if removed_count > 0 {
+        info!("Cleaned up {} deleted files from database", removed_count);
+    } else {
+        info!("All cached files are still present on disk");
+    }
+    
+
+    Ok(valid_files)
+}
+
 /// Perform initial media scan, using database cache when possible
 async fn perform_initial_media_scan(config: &AppConfig, database: &Arc<dyn DatabaseManager>) -> anyhow::Result<Vec<database::MediaFile>> {
     info!("Performing initial media scan...");
@@ -746,7 +778,16 @@ async fn perform_initial_media_scan(config: &AppConfig, database: &Arc<dyn Datab
             .context("Failed to load media files from database after scan")?;
 
         info!("Loaded {} total media files from database", all_media_files.len());
-        Ok(all_media_files)
+        
+        // Even after a full scan, validate files to catch any that were deleted while app was offline
+        // This is important because the scan only covers configured directories
+        let validated_files = if config.media.cleanup_deleted_files {
+            validate_and_cleanup_deleted_files(database.clone(), all_media_files).await?
+        } else {
+            all_media_files
+        };
+        
+        Ok(validated_files)
     } else {
         info!("Loading media files from database cache (scan on startup disabled)");
 
@@ -755,18 +796,24 @@ async fn perform_initial_media_scan(config: &AppConfig, database: &Arc<dyn Datab
 
         info!("Loaded {} media files from database cache", cached_files.len());
 
-        Ok(cached_files)
+        // Validate that cached files still exist on disk and remove any that don't (if enabled)
+        let validated_files = if config.media.cleanup_deleted_files {
+            validate_and_cleanup_deleted_files(database.clone(), cached_files).await?
+        } else {
+            info!("Cleanup of deleted files is disabled");
+            cached_files
+        };
+
+        Ok(validated_files)
     }
 }
 
 /// Start file system monitoring with database integration
 async fn start_file_monitoring(
     watcher: Arc<CrossPlatformWatcher>,
-    config: &AppConfig,
-    database: Arc<dyn DatabaseManager>,
-    media_files: Arc<RwLock<Vec<database::MediaFile>>>,
+    app_state: AppState,
 ) -> anyhow::Result<()> {
-    if !config.media.watch_for_changes {
+    if !app_state.config.media.watch_for_changes {
         info!("File system monitoring disabled");
         return Ok(());
     }
@@ -774,7 +821,7 @@ async fn start_file_monitoring(
     info!("Starting file system monitoring...");
     
     // Get directories to monitor
-    let directories: Vec<std::path::PathBuf> = config.media.directories
+    let directories: Vec<std::path::PathBuf> = app_state.config.media.directories
         .iter()
         .map(|dir| std::path::PathBuf::from(&dir.path))
         .filter(|path| path.exists() && path.is_dir())
@@ -785,22 +832,28 @@ async fn start_file_monitoring(
         return Ok(());
     }
     
+    info!("Starting to monitor {} directories:", directories.len());
+    for (i, dir) in directories.iter().enumerate() {
+        info!("  {}: {}", i + 1, dir.display());
+    }
+    
     // Start watching directories
     watcher.start_watching(&directories).await
         .context("Failed to start watching directories")?;
+    
+    info!("File system watcher successfully started for all directories");
     
     // Get event receiver
     let mut event_receiver = watcher.get_event_receiver();
     
     // Spawn task to handle file system events
-    let database_clone = database.clone();
-    let media_files_clone = media_files.clone();
+    let app_state_clone = app_state.clone();
     
     tokio::spawn(async move {
         info!("File system event handler started");
         
         while let Some(event) = event_receiver.recv().await {
-            if let Err(e) = handle_file_system_event(event, &database_clone, &media_files_clone).await {
+            if let Err(e) = handle_file_system_event(event, &app_state_clone).await {
                 error!("Failed to handle file system event: {}", e);
             }
         }
@@ -812,12 +865,25 @@ async fn start_file_monitoring(
     Ok(())
 }
 
+/// Increment the content update ID to notify DLNA clients of changes
+fn increment_content_update_id(app_state: &AppState) {
+    let old_id = app_state.content_update_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let new_id = old_id + 1;
+    info!("Content update ID incremented from {} to {}", old_id, new_id);
+    
+    // Send UPnP event notifications to subscribed clients
+    // In a full implementation, we would maintain a list of subscribed clients
+    // For now, we'll just log that an event should be sent
+    info!("UPnP event notification should be sent with UpdateID: {}", new_id);
+}
+
 /// Handle individual file system events
 async fn handle_file_system_event(
     event: FileSystemEvent,
-    database: &Arc<dyn DatabaseManager>,
-    media_files: &Arc<RwLock<Vec<database::MediaFile>>>,
+    app_state: &AppState,
 ) -> anyhow::Result<()> {
+    let database = &app_state.database;
+    let media_files = &app_state.media_files;
     match event {
         FileSystemEvent::Created(path) => {
             // Check if this is a directory or a file
@@ -842,6 +908,11 @@ async fn handle_file_system_event(
                         }
                         
                         info!("Added {} media files from new directory: {}", scan_result.new_files.len(), path.display());
+                        
+                        // Increment update ID to notify DLNA clients
+                        if !scan_result.new_files.is_empty() {
+                            increment_content_update_id(app_state);
+                        }
                     }
                     Err(e) => {
                         error!("Failed to scan new directory {}: {}", path.display(), e);
@@ -882,6 +953,9 @@ async fn handle_file_system_event(
                 files.push(media_file);
                 
                 info!("Added new media file to database: {}", path.display());
+                
+                // Increment update ID to notify DLNA clients
+                increment_content_update_id(app_state);
             }
         }
         
@@ -903,6 +977,9 @@ async fn handle_file_system_event(
                 }
                 
                 info!("Updated media file in database: {}", path.display());
+                
+                // Increment update ID to notify DLNA clients
+                increment_content_update_id(app_state);
             }
         }
         
@@ -944,36 +1021,105 @@ async fn handle_file_system_event(
             if total_removed > 0 {
                 info!("Removed {} media files from database and {} from cache for deleted path: {}", 
                       total_removed, removed_from_cache, path.display());
+                
+                // Increment update ID to notify DLNA clients
+                increment_content_update_id(app_state);
             } else {
                 debug!("No media files found to remove for deleted path: {}", path.display());
             }
         }
         
         FileSystemEvent::Renamed { from, to } => {
-            info!("Media file renamed: {} -> {}", from.display(), to.display());
+            info!("Path renamed: {} -> {}", from.display(), to.display());
             
-            // Handle as delete + create without recursion
-            // Remove from database
-            database.remove_media_file(&from).await?;
-            
-            // Remove from in-memory cache
-            let mut files = media_files.write().await;
-            files.retain(|f| f.path != from);
-            
-            // Create MediaFile record for new location
-            let metadata = tokio::fs::metadata(&to).await?;
-            let mime_type = media::get_mime_type(&to);
-            let mut media_file = database::MediaFile::new(to.clone(), metadata.len(), mime_type);
-            media_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
-            
-            // Store in database
-            let file_id = database.store_media_file(&media_file).await?;
-            media_file.id = Some(file_id);
-            
-            // Add to in-memory cache
-            files.push(media_file);
-            
-            info!("Renamed media file: {} -> {}", from.display(), to.display());
+            // Check if the destination is a directory or file
+            if to.is_dir() {
+                // Handle directory rename
+                info!("Directory renamed: {} -> {}", from.display(), to.display());
+                
+                // Get all files that were in the old directory path
+                let all_files = database.get_all_media_files().await?;
+                let files_in_old_path: Vec<_> = all_files
+                    .iter()
+                    .filter(|file| file.path.starts_with(&from))
+                    .collect();
+                
+                if !files_in_old_path.is_empty() {
+                    info!("Updating {} media files for renamed directory", files_in_old_path.len());
+                    
+                    // Remove old files from database and cache
+                    let mut files = media_files.write().await;
+                    for old_file in &files_in_old_path {
+                        database.remove_media_file(&old_file.path).await?;
+                        files.retain(|f| f.path != old_file.path);
+                    }
+                    drop(files); // Release the lock before scanning
+                    
+                    // Scan the new directory location
+                    let scanner = media::MediaScanner::with_database(database.clone());
+                    match scanner.scan_directory_recursive(&to).await {
+                        Ok(scan_result) => {
+                            info!("Rescanned renamed directory {}: {}", to.display(), scan_result.summary());
+                            
+                            // Update in-memory cache with newly found files
+                            if !scan_result.new_files.is_empty() {
+                                let mut files = media_files.write().await;
+                                for new_file in &scan_result.new_files {
+                                    files.push(new_file.clone());
+                                }
+                            }
+                            
+                            // Increment update ID to notify DLNA clients
+                            increment_content_update_id(app_state);
+                        }
+                        Err(e) => {
+                            error!("Failed to rescan renamed directory {}: {}", to.display(), e);
+                        }
+                    }
+                }
+            } else {
+                // Handle individual file rename
+                info!("File renamed: {} -> {}", from.display(), to.display());
+                
+                // Check if it's a media file
+                let is_media_file = if let Some(extension) = to.extension() {
+                    if let Some(ext_str) = extension.to_str() {
+                        crate::platform::filesystem::is_supported_media_extension(ext_str)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                
+                if !is_media_file {
+                    debug!("Renamed file is not a media file, ignoring: {}", to.display());
+                    return Ok(());
+                }
+                
+                // Remove old file from database and cache
+                database.remove_media_file(&from).await?;
+                let mut files = media_files.write().await;
+                files.retain(|f| f.path != from);
+                
+                // Create MediaFile record for new location
+                let metadata = tokio::fs::metadata(&to).await?;
+                let mime_type = media::get_mime_type(&to);
+                let mut media_file = database::MediaFile::new(to.clone(), metadata.len(), mime_type);
+                media_file.modified = metadata.modified().unwrap_or(std::time::SystemTime::now());
+                
+                // Store in database
+                let file_id = database.store_media_file(&media_file).await?;
+                media_file.id = Some(file_id);
+                
+                // Add to in-memory cache
+                files.push(media_file);
+                
+                info!("Renamed media file: {} -> {}", from.display(), to.display());
+                
+                // Increment update ID to notify DLNA clients
+                increment_content_update_id(app_state);
+            }
         }
     }
     

@@ -6,14 +6,14 @@ use crate::{
 use axum::{
     body::Body,
     extract::{Path, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, StatusCode, Method},
     response::{IntoResponse, Response},
 };
 use futures_util::StreamExt;
 use tokio::fs::File;
 use tokio::io::AsyncSeekExt;
 use tokio_util::io::ReaderStream;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub async fn root_handler() -> &'static str {
     "OpenDLNA Media Server"
@@ -164,5 +164,110 @@ fn parse_range_header(range_str: &str, file_size: u64) -> Result<(u64, u64), App
         Ok((start, end))
     } else {
         Err(AppError::InvalidRange)
+    }
+}
+
+/// Handle UPnP eventing subscription requests for ContentDirectory service
+pub async fn content_directory_subscribe(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    method: Method,
+) -> impl IntoResponse {
+    // Handle SUBSCRIBE method (which might come as GET or a custom method)
+    if method == Method::GET || headers.get("CALLBACK").is_some() {
+        // Handle subscription request
+        if let Some(callback) = headers.get("CALLBACK") {
+            let callback_url = callback.to_str().unwrap_or("");
+            info!("UPnP subscription request from: {}", callback_url);
+            
+            // Generate a subscription ID (in a real implementation, this should be stored)
+            let subscription_id = format!("uuid:{}", uuid::Uuid::new_v4());
+            let timeout = "Second-1800"; // 30 minutes
+            
+            // Get current update ID
+            let update_id = state.content_update_id.load(std::sync::atomic::Ordering::Relaxed);
+            
+            // Send initial event notification
+            tokio::spawn(send_initial_event_notification(callback_url.to_string(), update_id));
+            
+            (
+                StatusCode::OK,
+                [
+                    (header::HeaderName::from_static("sid"), subscription_id.as_str()),
+                    (header::HeaderName::from_static("timeout"), timeout),
+                    (header::CONTENT_LENGTH, "0"),
+                ],
+                "",
+            ).into_response()
+        } else {
+            warn!("UPnP subscription request missing CALLBACK header");
+            (
+                StatusCode::BAD_REQUEST,
+                [
+                    (header::CONTENT_TYPE, "text/plain"),
+                    (header::CONTENT_LENGTH, "0"),
+                ],
+                "",
+            ).into_response()
+        }
+    } else if headers.get("SID").is_some() {
+        // Handle unsubscription request (UNSUBSCRIBE method)
+        let subscription_id = headers.get("SID").unwrap().to_str().unwrap_or("");
+        info!("UPnP unsubscription request for: {}", subscription_id);
+        
+        (
+            StatusCode::OK,
+            [(header::CONTENT_LENGTH, "0")],
+            "",
+        ).into_response()
+    } else {
+        (
+            StatusCode::METHOD_NOT_ALLOWED,
+            [
+                (header::CONTENT_TYPE, "text/plain"),
+                (header::CONTENT_LENGTH, "0"),
+            ],
+            "",
+        ).into_response()
+    }
+}
+
+/// Send initial event notification to a subscribed client
+async fn send_initial_event_notification(callback_url: String, update_id: u32) {
+    let event_body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">
+    <e:property>
+        <SystemUpdateID>{}</SystemUpdateID>
+    </e:property>
+    <e:property>
+        <ContainerUpdateIDs></ContainerUpdateIDs>
+    </e:property>
+</e:propertyset>"#,
+        update_id
+    );
+    
+    // Extract the actual URL from the callback (remove angle brackets if present)
+    let url = callback_url.trim_start_matches('<').trim_end_matches('>');
+    
+    let client = reqwest::Client::new();
+    match client
+        .request(reqwest::Method::from_bytes(b"NOTIFY").unwrap(), url)
+        .header("HOST", "")
+        .header("CONTENT-TYPE", "text/xml; charset=\"utf-8\"")
+        .header("NT", "upnp:event")
+        .header("NTS", "upnp:propchange")
+        .header("SID", "uuid:dummy") // In real implementation, use actual subscription ID
+        .header("SEQ", "0")
+        .body(event_body)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            debug!("Event notification sent successfully, status: {}", response.status());
+        }
+        Err(e) => {
+            warn!("Failed to send event notification to {}: {}", url, e);
+        }
     }
 }

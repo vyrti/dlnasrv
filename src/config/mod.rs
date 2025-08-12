@@ -17,6 +17,10 @@ pub mod example;
 use crate::platform::config::PlatformConfig;
 use validation::ConfigValidator;
 
+fn default_cleanup_deleted_files() -> bool {
+    true
+}
+
 /// Main application configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -59,6 +63,8 @@ pub struct MediaConfig {
     pub directories: Vec<MonitoredDirectoryConfig>,
     pub scan_on_startup: bool,
     pub watch_for_changes: bool,
+    #[serde(default = "default_cleanup_deleted_files")]
+    pub cleanup_deleted_files: bool,
     pub supported_extensions: Vec<String>,
 }
 
@@ -342,6 +348,7 @@ impl AppConfig {
                 directories: monitored_dirs,
                 scan_on_startup: true,
                 watch_for_changes: true,
+                cleanup_deleted_files: true,
                 supported_extensions: platform_config.get_default_media_extensions(),
             },
             database: DatabaseConfig {

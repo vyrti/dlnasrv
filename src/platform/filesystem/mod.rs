@@ -4,6 +4,8 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tokio::fs;
 
+use crate::database::MediaFile;
+
 #[cfg(target_os = "windows")]
 pub mod windows;
 
@@ -309,46 +311,6 @@ pub struct FilePermissions {
     
     /// Platform-specific permission details
     pub platform_details: HashMap<String, String>,
-}
-
-/// Media file representation with platform-aware handling
-#[derive(Debug, Clone)]
-pub struct MediaFile {
-    /// Unique identifier for the file
-    pub id: Option<i64>,
-    
-    /// Full path to the file
-    pub path: PathBuf,
-    
-    /// File name only
-    pub filename: String,
-    
-    /// File size in bytes
-    pub size: u64,
-    
-    /// Last modified time
-    pub modified: SystemTime,
-    
-    /// MIME type
-    pub mime_type: String,
-    
-    /// Media duration (for audio/video files)
-    pub duration: Option<std::time::Duration>,
-    
-    /// Media title metadata
-    pub title: Option<String>,
-    
-    /// Media artist metadata
-    pub artist: Option<String>,
-    
-    /// Media album metadata
-    pub album: Option<String>,
-    
-    /// When this record was created
-    pub created_at: SystemTime,
-    
-    /// When this record was last updated
-    pub updated_at: SystemTime,
 }
 
 /// Supported media file extensions and their MIME types

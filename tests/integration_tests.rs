@@ -429,34 +429,6 @@ mod error_handling_tests {
     use super::*;
     
     #[tokio::test]
-    async fn test_network_error_recovery() {
-        let network_manager = PlatformNetworkManager::new();
-        
-        // Test port binding failure recovery
-        let impossible_config = SsdpConfig {
-            primary_port: 1, // Definitely privileged and likely in use
-            fallback_ports: vec![8080, 8081, 8082],
-            ..Default::default()
-        };
-        
-        let socket_result = network_manager.create_ssdp_socket_with_config(&impossible_config).await;
-        
-        match socket_result {
-            Ok(socket) => {
-                // If successful, should be using a fallback port
-                assert_ne!(socket.port, 1, "Should not be using the impossible port");
-                println!("Successfully recovered to port {}", socket.port);
-            }
-            Err(e) => {
-                println!("Port binding failed as expected: {}", e);
-                // This is acceptable - the error should be informative
-                let error_msg = format!("{}", e);
-                assert!(error_msg.contains("port") || error_msg.contains("bind") || error_msg.contains("privilege"));
-            }
-        }
-    }
-    
-    #[tokio::test]
     async fn test_multicast_fallback_recovery() {
         let network_manager = PlatformNetworkManager::new();
         

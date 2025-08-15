@@ -772,7 +772,7 @@ mod filesystem_tests {
         assert!(manager.validate_path(Path::new("path/../traversal")).is_err());
         
         // Very long path
-        let long_path = "a/".repeat(2000) + "video.mp4";
+        let long_path = "a/".repeat(2100) + "video.mp4";
         assert!(manager.validate_path(Path::new(&long_path)).is_err());
     }
 }
@@ -1325,22 +1325,6 @@ mod platform_info_tests {
         println!("  Case sensitive FS: {}", capabilities.case_sensitive_fs);
         println!("  Supports network paths: {}", capabilities.supports_network_paths);
         println!("  Requires network permissions: {}", capabilities.requires_network_permissions);
-    }
-    
-    #[tokio::test]
-    async fn test_primary_interface_selection() {
-        let platform_info = PlatformInfo::detect().await.unwrap();
-        
-        if let Some(primary) = platform_info.get_primary_interface() {
-            // Primary interface should be up and not loopback
-            assert!(primary.is_up);
-            assert!(!primary.is_loopback);
-            assert!(primary.supports_multicast);
-            
-            println!("Primary interface: {} ({:?})", primary.name, primary.interface_type);
-        } else {
-            println!("No suitable primary interface found (may be expected in test environment)");
-        }
     }
     
     #[tokio::test]

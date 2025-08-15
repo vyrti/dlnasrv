@@ -466,28 +466,54 @@ mod tests {
         watcher.start_watching(&[temp_dir.path().to_path_buf()]).await.unwrap();
         
         // Give the watcher time to initialize
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(200)).await;
         
         // Create a media file
         let test_file = temp_dir.path().join("test.mp4");
         fs::write(&test_file, b"test content").unwrap();
         
-        // Wait for event with timeout
-        let event_result = timeout(Duration::from_secs(2), receiver.recv()).await;
-        
-        if let Ok(Some(event)) = event_result {
+        // Wait for the correct event with timeout, ignoring directory creation events
+        let timeout_duration = Duration::from_secs(5);
+        let correct_event_result = timeout(timeout_duration, async {
+            loop {
+                let event = receiver.recv().await;
+                match event {
+                    Some(FileSystemEvent::Created(path)) => {
+                        let canonical_received = path.canonicalize().unwrap_or_else(|_| path.clone());
+                        let canonical_expected = test_file.canonicalize().unwrap_or_else(|_| test_file.clone());
+                        
+                        if canonical_received == canonical_expected {
+                            // This is the event we are looking for
+                            return Some(FileSystemEvent::Created(path));
+                        } else {
+                            // This is likely the directory creation event, ignore it and continue waiting
+                            info!("Ignoring creation event for path: {:?}", path);
+                        }
+                    }
+                    Some(other_event) => {
+                        // Ignore other events for this test
+                        info!("Ignoring other event: {:?}", other_event);
+                    }
+                    None => {
+                        // Channel is closed, stop waiting
+                        return None;
+                    }
+                }
+            }
+        }).await;
+
+        if let Ok(Some(event)) = correct_event_result {
             match event {
                 FileSystemEvent::Created(path) => {
-                    // Use canonical paths for comparison to handle symlinks
                     let canonical_received = path.canonicalize().unwrap_or(path);
                     let canonical_expected = test_file.canonicalize().unwrap_or(test_file);
                     assert_eq!(canonical_received, canonical_expected);
                 }
-                _ => panic!("Expected Created event, got {:?}", event),
+                _ => panic!("Received an unexpected event type after filtering"),
             }
         } else {
             // Events might be flaky in test environments, so we don't fail the test
-            println!("No file system event received (this can happen in test environments)");
+            warn!("No specific file creation event received within {:?}. This can sometimes happen in test environments.", timeout_duration);
         }
         
         watcher.stop_watching().await.unwrap();

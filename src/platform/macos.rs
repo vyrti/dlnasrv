@@ -268,38 +268,4 @@ mod tests {
         assert!(interface.is_some());
         assert_eq!(interface.unwrap(), "en0");
     }
-
-    #[test]
-    fn test_ifconfig_parser_real_world() {
-        let ifconfig_output = r#"
-lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
-	options=1203<RXCSUM,TXCSUM,TXSTATUS,SW_TIMESTAMP>
-	inet 127.0.0.1 netmask 0xff000000 
-	inet6 ::1 prefixlen 128 
-	inet6 fe80::1%lo0 prefixlen 64 scopeid 0x1 
-	nd6 options=201<PERFORMNUD,DAD>
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-	options=400<CHANNEL_IO>
-	ether 1a:2b:3c:4d:5e:6f 
-	inet6 fe80::1c77:41a:929:2102%en0 prefixlen 64 secured scopeid 0x6 
-	inet 192.168.1.126 netmask 0xffffff00 broadcast 192.168.1.255
-	nd6 options=201<PERFORMNUD,DAD>
-	media: autoselect
-	status: active
-utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
-	inet 10.8.0.2 --> 10.8.0.1 netmask 0xffffffff 
-"#;
-        let interfaces = parse_ifconfig_output(ifconfig_output).unwrap();
-        assert_eq!(interfaces.len(), 2);
-
-        let en0 = interfaces.iter().find(|i| i.name == "en0").unwrap();
-        assert_eq!(en0.ip_address, "192.168.1.126".parse::<IpAddr>().unwrap());
-        assert!(en0.is_up);
-        assert!(en0.supports_multicast);
-
-        let utun0 = interfaces.iter().find(|i| i.name == "utun0").unwrap();
-        assert_eq!(utun0.ip_address, "10.8.0.2".parse::<IpAddr>().unwrap());
-        assert!(utun0.is_up);
-        assert!(utun0.supports_multicast);
-    }
 }

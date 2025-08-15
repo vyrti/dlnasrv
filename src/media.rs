@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::warn;
 
-use crate::database::{DatabaseManager, MediaFile as DbMediaFile};
-use crate::platform::filesystem::{FileSystemManager, MediaFile as FsMediaFile, create_platform_filesystem_manager};
+use crate::database::{DatabaseManager, MediaFile};
+use crate::platform::filesystem::{create_platform_filesystem_manager, FileSystemManager};
 
 /// Media scanner that uses the file system manager and database for efficient scanning
 pub struct MediaScanner {
@@ -36,7 +36,7 @@ impl MediaScanner {
     }
     
     /// Simple directory scan that returns files without database operations
-    pub async fn scan_directory_simple(&self, directory: &Path) -> Result<Vec<DbMediaFile>> {
+    pub async fn scan_directory_simple(&self, directory: &Path) -> Result<Vec<MediaFile>> {
         let normalized_dir = self.filesystem_manager.normalize_path(directory);
         
         // Validate the directory path
@@ -55,17 +55,11 @@ impl MediaScanner {
             .await
             .map_err(|e| anyhow::anyhow!("File system scan failed: {}", e))?;
         
-        // Convert filesystem MediaFiles to database MediaFiles
-        let db_files: Vec<DbMediaFile> = fs_files
-            .into_iter()
-            .map(|fs_file| self.convert_fs_to_db_media_file(fs_file))
-            .collect();
-        
-        Ok(db_files)
+        Ok(fs_files)
     }
 
     /// Simple recursive directory scan that returns files without database operations
-    pub async fn scan_directory_recursively_simple(&self, directory: &Path) -> Result<Vec<DbMediaFile>> {
+    pub async fn scan_directory_recursively_simple(&self, directory: &Path) -> Result<Vec<MediaFile>> {
         let mut all_files = Vec::new();
         let mut dirs_to_scan = vec![directory.to_path_buf()];
 
@@ -73,11 +67,7 @@ impl MediaScanner {
             // Scan current directory for files
             match self.filesystem_manager.scan_media_directory(&current_dir).await {
                 Ok(fs_files) => {
-                    let db_files: Vec<DbMediaFile> = fs_files
-                        .into_iter()
-                        .map(|fs_file| self.convert_fs_to_db_media_file(fs_file))
-                        .collect();
-                    all_files.extend(db_files);
+                    all_files.extend(fs_files);
                 }
                 Err(e) => warn!("Failed to scan directory {}: {}", current_dir.display(), e),
             }
@@ -112,7 +102,7 @@ impl MediaScanner {
     }
     
     /// Internal method that allows passing existing files to avoid repeated database queries during recursive scans
-    async fn scan_directory_with_existing_files(&self, directory: &Path, all_existing_files: Option<&[DbMediaFile]>) -> Result<ScanResult> {
+    async fn scan_directory_with_existing_files(&self, directory: &Path, all_existing_files: Option<&[MediaFile]>) -> Result<ScanResult> {
         let normalized_dir = self.filesystem_manager.normalize_path(directory);
         
         // Validate the directory path
@@ -143,53 +133,28 @@ impl MediaScanner {
         };
         
         // Scan the file system for current files
-        let fs_files = self.filesystem_manager
+        let current_files = self.filesystem_manager
             .scan_media_directory(&normalized_dir)
             .await
             .map_err(|e| anyhow::anyhow!("File system scan failed: {}", e))?;
         
-        // Convert filesystem MediaFiles to database MediaFiles
-        // Note: Path normalization will be handled in perform_incremental_update
-        let current_files: Vec<DbMediaFile> = fs_files
-            .into_iter()
-            .map(|fs_file| self.convert_fs_to_db_media_file(fs_file))
-            .collect();
-        
         // Perform incremental update
         self.perform_incremental_update(&normalized_dir, existing_files, current_files).await
-    }
-    
-    /// Convert filesystem MediaFile to database MediaFile
-    fn convert_fs_to_db_media_file(&self, fs_file: FsMediaFile) -> DbMediaFile {
-        DbMediaFile {
-            id: fs_file.id,
-            path: fs_file.path,
-            filename: fs_file.filename,
-            size: fs_file.size,
-            modified: fs_file.modified,
-            mime_type: fs_file.mime_type,
-            duration: fs_file.duration,
-            title: fs_file.title,
-            artist: fs_file.artist,
-            album: fs_file.album,
-            created_at: fs_file.created_at,
-            updated_at: fs_file.updated_at,
-        }
     }
     
     /// Perform an incremental update by comparing database state with file system state
     async fn perform_incremental_update(
         &self,
         _directory: &Path,
-        existing_files: Vec<DbMediaFile>,
-        current_files: Vec<DbMediaFile>,
+        existing_files: Vec<MediaFile>,
+        current_files: Vec<MediaFile>,
     ) -> Result<ScanResult> {
         let mut result = ScanResult::new();
         
         // Create lookup maps for efficient comparison
         // Use both original and normalized paths to handle legacy database entries
-        let mut existing_by_original: std::collections::HashMap<PathBuf, DbMediaFile> = std::collections::HashMap::new();
-        let mut existing_by_normalized: std::collections::HashMap<PathBuf, DbMediaFile> = std::collections::HashMap::new();
+        let mut existing_by_original: std::collections::HashMap<PathBuf, MediaFile> = std::collections::HashMap::new();
+        let mut existing_by_normalized: std::collections::HashMap<PathBuf, MediaFile> = std::collections::HashMap::new();
         
         for existing_file in existing_files {
             let normalized_path = self.filesystem_manager.normalize_path(&existing_file.path);
@@ -201,7 +166,7 @@ impl MediaScanner {
         }
         
         // Current files paths - normalize for consistent comparison
-        let current_normalized: std::collections::HashMap<PathBuf, DbMediaFile> = current_files
+        let current_normalized: std::collections::HashMap<PathBuf, MediaFile> = current_files
             .iter()
             .map(|f| {
                 let normalized_path = self.filesystem_manager.normalize_path(&f.path);
@@ -283,7 +248,7 @@ impl MediaScanner {
     }
     
     /// Check if a file needs to be updated in the database
-    fn file_needs_update(&self, existing: &DbMediaFile, current: &DbMediaFile) -> bool {
+    fn file_needs_update(&self, existing: &MediaFile, current: &MediaFile) -> bool {
         // Compare file sizes first (most reliable)
         if existing.size != current.size {
             return true;
@@ -390,16 +355,16 @@ impl MediaScanner {
 #[derive(Debug, Clone)]
 pub struct ScanResult {
     /// Files that were newly added to the database
-    pub new_files: Vec<DbMediaFile>,
+    pub new_files: Vec<MediaFile>,
     
     /// Files that were updated in the database
-    pub updated_files: Vec<DbMediaFile>,
+    pub updated_files: Vec<MediaFile>,
     
     /// Files that were removed from the database
-    pub removed_files: Vec<DbMediaFile>,
+    pub removed_files: Vec<MediaFile>,
     
     /// Files that were unchanged
-    pub unchanged_files: Vec<DbMediaFile>,
+    pub unchanged_files: Vec<MediaFile>,
     
     /// Total number of files scanned from the file system
     pub total_scanned: usize,
@@ -475,7 +440,7 @@ pub struct ScanError {
 /// 
 /// This function is deprecated in favor of using MediaScanner directly
 #[deprecated(note = "Use MediaScanner::scan_directory instead")]
-pub async fn scan_media_files(dir: &PathBuf) -> Result<Vec<DbMediaFile>> {
+pub async fn scan_media_files(dir: &PathBuf) -> Result<Vec<MediaFile>> {
     let filesystem_manager = create_platform_filesystem_manager();
     
     let fs_files = filesystem_manager
@@ -483,26 +448,7 @@ pub async fn scan_media_files(dir: &PathBuf) -> Result<Vec<DbMediaFile>> {
         .await
         .map_err(|e| anyhow::anyhow!("Scan failed: {}", e))?;
     
-    // Convert filesystem MediaFiles to database MediaFiles
-    let db_files: Vec<DbMediaFile> = fs_files
-        .into_iter()
-        .map(|fs_file| DbMediaFile {
-            id: fs_file.id,
-            path: fs_file.path,
-            filename: fs_file.filename,
-            size: fs_file.size,
-            modified: fs_file.modified,
-            mime_type: fs_file.mime_type,
-            duration: fs_file.duration,
-            title: fs_file.title,
-            artist: fs_file.artist,
-            album: fs_file.album,
-            created_at: fs_file.created_at,
-            updated_at: fs_file.updated_at,
-        })
-        .collect();
-    
-    Ok(db_files)
+    Ok(fs_files)
 }
 
 /// Get MIME type for a file based on its extension
@@ -588,7 +534,7 @@ mod tests {
     async fn test_scan_result_operations() {
         let mut result1 = ScanResult::new();
         result1.total_scanned = 5;
-        result1.new_files.push(DbMediaFile {
+        result1.new_files.push(MediaFile {
             id: Some(1),
             path: PathBuf::from("/test1.mp4"),
             filename: "test1.mp4".to_string(),
@@ -605,7 +551,7 @@ mod tests {
         
         let mut result2 = ScanResult::new();
         result2.total_scanned = 3;
-        result2.updated_files.push(DbMediaFile {
+        result2.updated_files.push(MediaFile {
             id: Some(2),
             path: PathBuf::from("/test2.mp4"),
             filename: "test2.mp4".to_string(),

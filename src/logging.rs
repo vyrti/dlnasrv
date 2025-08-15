@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn test_logging_initialization() {
         // Test basic logging initialization
-        let result = init_logging_with_options(Some("debug"), None);
+        let result = init_logging_with_options(Some("debug"), None, true);
         assert!(result.is_ok());
     }
     

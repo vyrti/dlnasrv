@@ -16,7 +16,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{debug, info, warn};
 
 pub async fn root_handler() -> &'static str {
-    "OpenDLNA Media Server"
+    "VuIO Media Server"
 }
 
 pub async fn description_handler(State(state): State<AppState>) -> impl IntoResponse {

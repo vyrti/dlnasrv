@@ -38,7 +38,7 @@ pub enum WindowsError {
     #[error("Administrator privileges required for port {port}. Try running as administrator or use an alternative port (8080, 8081, 8082)")]
     PrivilegedPortAccess { port: u16 },
     
-    #[error("Windows Firewall is blocking multicast traffic. Please add an exception for OpenDLNA in Windows Defender Firewall settings")]
+    #[error("Windows Firewall is blocking multicast traffic. Please add an exception for VuIO in Windows Defender Firewall settings")]
     FirewallBlocked,
     
     #[error("UNC path access denied: {path}. Check network credentials and path accessibility")]
@@ -69,7 +69,7 @@ pub enum MacOSError {
     #[error("Keychain access denied: {reason}. Check keychain permissions")]
     KeychainAccessDenied { reason: String },
     
-    #[error("macOS Application Firewall is blocking connections. Add OpenDLNA to allowed applications")]
+    #[error("macOS Application Firewall is blocking connections. Add VuIO to allowed applications")]
     ApplicationFirewallBlocked,
     
     #[error("Sandbox restriction: {operation}. The application may be running in a restricted environment")]
@@ -91,7 +91,7 @@ pub enum MacOSError {
 /// Linux-specific error types with distribution-specific guidance
 #[derive(Error, Debug)]
 pub enum LinuxError {
-    #[error("Insufficient capabilities for port {port}. Try: sudo setcap 'cap_net_bind_service=+ep' /path/to/opendlna")]
+    #[error("Insufficient capabilities for port {port}. Try: sudo setcap 'cap_net_bind_service=+ep' /path/to/vuio")]
     InsufficientCapabilities { port: u16 },
     
     #[error("SELinux policy violation: {context}. Try: sudo setsebool -P httpd_can_network_connect 1")]
@@ -100,7 +100,7 @@ pub enum LinuxError {
     #[error("AppArmor restriction: {profile}. Check AppArmor profile configuration")]
     AppArmorRestriction { profile: String },
     
-    #[error("Systemd service error: {reason}. Check: systemctl status opendlna")]
+    #[error("Systemd service error: {reason}. Check: systemctl status vuio")]
     SystemdServiceError { reason: String },
     
     #[error("Network namespace error: {namespace}. Check network configuration")]
@@ -227,7 +227,7 @@ impl WindowsError {
             WindowsError::PrivilegedPortAccess { .. } => 
                 "1. Run as Administrator, or 2. Use alternative ports (8080-8082), or 3. Configure Windows to allow non-privileged port binding",
             WindowsError::FirewallBlocked => 
-                "1. Open Windows Defender Firewall, 2. Click 'Allow an app through firewall', 3. Add OpenDLNA to exceptions",
+                "1. Open Windows Defender Firewall, 2. Click 'Allow an app through firewall', 3. Add VuIO to exceptions",
             WindowsError::UncPathDenied { .. } => 
                 "1. Check network connectivity, 2. Verify credentials, 3. Test path accessibility in File Explorer",
             WindowsError::ServiceRegistrationFailed { .. } => 
@@ -264,7 +264,7 @@ impl WindowsError {
                 "Configure port forwarding if needed".to_string(),
             ],
             WindowsError::FirewallBlocked => vec![
-                "Add OpenDLNA to Windows Firewall exceptions".to_string(),
+                "Add VuIO to Windows Firewall exceptions".to_string(),
                 "Temporarily disable firewall for testing".to_string(),
                 "Configure specific port exceptions".to_string(),
             ],
@@ -277,11 +277,11 @@ impl MacOSError {
     pub fn troubleshooting_guide(&self) -> &'static str {
         match self {
             MacOSError::NetworkPermissionDenied => 
-                "1. Open System Preferences > Security & Privacy, 2. Grant network permissions to OpenDLNA",
+                "1. Open System Preferences > Security & Privacy, 2. Grant network permissions to VuIO",
             MacOSError::KeychainAccessDenied { .. } => 
                 "1. Open Keychain Access, 2. Check application permissions, 3. Reset keychain if necessary",
             MacOSError::ApplicationFirewallBlocked => 
-                "1. Open System Preferences > Security & Privacy > Firewall, 2. Add OpenDLNA to allowed apps",
+                "1. Open System Preferences > Security & Privacy > Firewall, 2. Add VuIO to allowed apps",
             MacOSError::SandboxRestriction { .. } => 
                 "1. Check app entitlements, 2. Disable sandbox if possible, 3. Request additional permissions",
             MacOSError::CoreFoundationError { .. } => 
@@ -315,7 +315,7 @@ impl MacOSError {
                 "Restart application after granting permissions".to_string(),
             ],
             MacOSError::ApplicationFirewallBlocked => vec![
-                "Add OpenDLNA to firewall exceptions".to_string(),
+                "Add VuIO to firewall exceptions".to_string(),
                 "Temporarily disable firewall for testing".to_string(),
             ],
             _ => vec!["Follow troubleshooting guide".to_string()],
@@ -364,7 +364,7 @@ impl LinuxError {
     pub fn recovery_actions(&self) -> Vec<String> {
         match self {
             LinuxError::InsufficientCapabilities { port } => vec![
-                format!("sudo setcap 'cap_net_bind_service=+ep' $(which opendlna)"),
+                format!("sudo setcap 'cap_net_bind_service=+ep' $(which vuio)"),
                 format!("Use alternative port instead of {}", port),
                 "Run with sudo (not recommended for production)".to_string(),
             ],
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn test_configuration_error_recovery() {
         let error = ConfigurationError::FileNotFound { 
-            path: PathBuf::from("/etc/opendlna/config.toml") 
+            path: PathBuf::from("/etc/vuio/config.toml") 
         };
         assert!(error.is_recoverable());
         assert!(!error.recovery_actions().is_empty());

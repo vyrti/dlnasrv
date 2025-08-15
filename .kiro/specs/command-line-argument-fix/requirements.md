@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This feature addresses a critical bug where the OpenDLNA application fails to respect command line arguments for specifying media directories on Windows. The application currently defaults to using `C:\Users\Welcome\Videos` instead of the provided command line argument `"C:\Users\Welcome\Downloads\Video"`, and incorrectly reports that Windows drive letter colons are invalid characters in paths.
+This feature addresses a critical bug where the VuIO application fails to respect command line arguments for specifying media directories on Windows. The application currently defaults to using `C:\Users\Welcome\Videos` instead of the provided command line argument `"C:\Users\Welcome\Downloads\Video"`, and incorrectly reports that Windows drive letter colons are invalid characters in paths.
 
 ## Requirements
 

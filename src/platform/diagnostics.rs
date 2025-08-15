@@ -432,7 +432,7 @@ impl DiagnosticInfo {
     
     /// Log diagnostic information at startup
     pub fn log_startup_diagnostics(&self) {
-        tracing::info!("=== OpenDLNA Startup Diagnostics ===");
+        tracing::info!("=== VuIO Startup Diagnostics ===");
         tracing::info!("Platform: {} {} ({})", 
             self.platform.os_type, 
             self.platform.os_version, 
@@ -627,7 +627,7 @@ impl StartupDiagnostics {
     async fn check_filesystem_requirements() -> Result<(), PlatformError> {
         // Check if we can create necessary directories
         let temp_dir = std::env::temp_dir();
-        let test_dir = temp_dir.join("opendlna_startup_test");
+        let test_dir = temp_dir.join("vuio_startup_test");
         
         match std::fs::create_dir_all(&test_dir) {
             Ok(_) => {

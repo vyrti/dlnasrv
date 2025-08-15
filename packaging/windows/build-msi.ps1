@@ -1,10 +1,10 @@
 #!/usr/bin/env pwsh
 
-# Build MSI installer for OpenDLNA on Windows
+# Build MSI installer for VuIO on Windows
 # Requires WiX Toolset v3 or v4 to be installed
 
 param(
-    [string]$BinaryPath = "..\..\target\x86_64-pc-windows-msvc\release\opendlna.exe",
+    [string]$BinaryPath = "..\..\target\x86_64-pc-windows-msvc\release\vuio.exe",
     [string]$OutputDir = "..\..\builds",
     [string]$Version = "0.1.0",
     [switch]$Help
@@ -18,7 +18,7 @@ function Show-Help {
     Write-Host "Usage: .\build-msi.ps1 [OPTIONS]"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -BinaryPath <string>  Path to the compiled opendlna.exe (default: target\x86_64-pc-windows-msvc\release\opendlna.exe)"
+    Write-Host "  -BinaryPath <string>  Path to the compiled vuio.exe (default: target\x86_64-pc-windows-msvc\release\vuio.exe)"
     Write-Host "  -OutputDir <string>   Output directory for MSI file (default: builds)"
     Write-Host "  -Version <string>     Version number for the installer (default: 0.1.0)"
     Write-Host "  -Help                Show this help message"
@@ -91,13 +91,13 @@ New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 
 # Create default configuration file
 $defaultConfig = @"
-# OpenDLNA Server Configuration
-# This is the default configuration file for OpenDLNA
+# VuIO Server Configuration
+# This is the default configuration file for VuIO
 
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "12345678-1234-1234-1234-123456789012"
 
 [network]
@@ -131,12 +131,12 @@ backup_enabled = true
 $defaultConfig | Out-File -FilePath "$configDir\default.toml" -Encoding UTF8
 
 # Copy binary to temp directory
-Copy-Item $BinaryPath "$tempDir\opendlna.exe"
+Copy-Item $BinaryPath "$tempDir\vuio.exe"
 
 # Create a simple RTF license file
 $licenseRtf = @"
 {\rtf1\ansi\deff0 {\fonttbl {\f0 Times New Roman;}}
-\f0\fs24 OpenDLNA Server License Agreement\par
+\f0\fs24 VuIO Server License Agreement\par
 \par
 This software is provided as-is under the MIT License.\par
 \par
@@ -156,14 +156,14 @@ Write-Host "✓ Build environment prepared" -ForegroundColor Green
 Write-Host ""
 Write-Host "--- Building MSI Installer ---" -ForegroundColor Yellow
 
-$wixObjFile = "opendlna.wixobj"
-$msiFile = "opendlna-$Version-x64.msi"
+$wixObjFile = "vuio.wixobj"
+$msiFile = "vuio-$Version-x64.msi"
 
 try {
     # Compile WiX source
     Write-Host "Compiling WiX source..."
     $candleArgs = @(
-        "opendlna.wxs",
+        "vuio.wxs",
         "-dSourceDir=$tempDir",
         "-dVersion=$Version",
         "-out", $wixObjFile

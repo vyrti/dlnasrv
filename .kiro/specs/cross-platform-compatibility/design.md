@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design document outlines the architecture and implementation strategy for making the OpenDLNA server fully cross-platform compatible. The solution addresses networking, file system, build process, and security challenges across Windows, macOS, and Linux platforms.
+This design document outlines the architecture and implementation strategy for making the VuIO server fully cross-platform compatible. The solution addresses networking, file system, build process, and security challenges across Windows, macOS, and Linux platforms.
 
 The design follows a layered approach with platform abstraction layers, graceful fallbacks, and comprehensive error handling to ensure consistent behavior across all supported platforms.
 
@@ -531,16 +531,16 @@ linker = "gcc"
 // Using wix-rs or similar for MSI generation
 pub fn create_windows_installer(config: &BuildConfig) -> Result<PathBuf> {
     let wix_config = WixConfig {
-        product_name: "OpenDLNA Server",
-        manufacturer: "OpenDLNA Project",
+        product_name: "VuIO Server",
+        manufacturer: "VuIO Project",
         version: env!("CARGO_PKG_VERSION"),
-        executable_path: "opendlna.exe",
-        install_dir: r"ProgramFiles\OpenDLNA",
+        executable_path: "vuio.exe",
+        install_dir: r"ProgramFiles\VuIO",
         create_desktop_shortcut: true,
         create_start_menu_entry: true,
         firewall_rules: vec![
-            FirewallRule::new("OpenDLNA HTTP", 8080, Protocol::Tcp),
-            FirewallRule::new("OpenDLNA SSDP", 1900, Protocol::Udp),
+            FirewallRule::new("VuIO HTTP", 8080, Protocol::Tcp),
+            FirewallRule::new("VuIO SSDP", 1900, Protocol::Udp),
         ],
     };
     

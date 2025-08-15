@@ -101,7 +101,7 @@ impl AppConfig {
             port: Option<u16>,
 
             /// The friendly name for the DLNA server
-            #[arg(short, long, default_value = "OpenDLNA Server")]
+            #[arg(short, long, default_value = "VuIO Server")]
             name: String,
 
             /// Enable debug logging
@@ -148,7 +148,7 @@ impl AppConfig {
                 config.server.port = port;
             }
             
-            if args.name != "OpenDLNA Server" {
+            if args.name != "VuIO Server" {
                 config.server.name = args.name;
             }
             
@@ -279,7 +279,7 @@ impl AppConfig {
         
         // Add platform-specific header comments
         let mut content = format!(
-            "# OpenDLNA Server Configuration\n# Platform: {}\n# Auto-generated configuration with platform-specific defaults\n\n",
+            "# VuIO Server Configuration\n# Platform: {}\n# Auto-generated configuration with platform-specific defaults\n\n",
             match platform_config.os_type {
                 crate::platform::OsType::Windows => "Windows",
                 crate::platform::OsType::MacOS => "macOS", 
@@ -415,9 +415,9 @@ impl AppConfig {
             .unwrap_or_else(|| "Unknown".to_string());
         
         match platform_config.os_type {
-            crate::platform::OsType::Windows => format!("OpenDLNA Server ({})", hostname),
-            crate::platform::OsType::MacOS => format!("OpenDLNA Server on {}", hostname),
-            crate::platform::OsType::Linux => format!("OpenDLNA Server - {}", hostname),
+            crate::platform::OsType::Windows => format!("VuIO Server ({})", hostname),
+            crate::platform::OsType::MacOS => format!("VuIO Server on {}", hostname),
+            crate::platform::OsType::Linux => format!("VuIO Server - {}", hostname),
         }
     }
 
@@ -672,7 +672,7 @@ impl AppConfig {
         }
         
         // Update server name if it's generic
-        if self.server.name == "OpenDLNA Server" || self.server.name.is_empty() {
+        if self.server.name == "VuIO Server" || self.server.name.is_empty() {
             self.server.name = Self::get_platform_server_name(&platform_config);
         }
         
@@ -929,7 +929,7 @@ impl AppConfig {
         match platform_config.os_type {
             crate::platform::OsType::Windows => {
                 recommendations.push("Use ports 8080-8082 to avoid administrator privilege requirements".to_string());
-                recommendations.push("Configure Windows Firewall to allow OpenDLNA Server".to_string());
+                recommendations.push("Configure Windows Firewall to allow VuIO Server".to_string());
                 recommendations.push("UNC paths (\\\\server\\share) are supported for network drives".to_string());
                 recommendations.push("Exclude Windows system files: Thumbs.db, desktop.ini".to_string());
                 recommendations.push("Consider using Windows Service for automatic startup".to_string());
@@ -1449,7 +1449,7 @@ mod tests {
         
         // Verify content contains platform-specific information
         let content = std::fs::read_to_string(&config_path)?;
-        assert!(content.contains("OpenDLNA Server Configuration"));
+        assert!(content.contains("VuIO Server Configuration"));
         assert!(content.contains("Platform:"));
         assert!(content.contains("Recommended ports"));
         

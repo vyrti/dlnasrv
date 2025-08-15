@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This feature aims to make the OpenDLNA server fully cross-platform compatible, ensuring it works reliably on Windows, macOS, and Linux systems without requiring special privileges or configuration. The current implementation works well on macOS but has several Windows compatibility issues related to networking, file handling, and build processes.
+This feature aims to make the VuIO server fully cross-platform compatible, ensuring it works reliably on Windows, macOS, and Linux systems without requiring special privileges or configuration. The current implementation works well on macOS but has several Windows compatibility issues related to networking, file handling, and build processes.
 
 ## Requirements
 

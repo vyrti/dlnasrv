@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn test_configuration_error_integration() {
         let config_error = ConfigurationError::FileNotFound { 
-            path: PathBuf::from("/etc/opendlna/config.toml") 
+            path: PathBuf::from("/etc/vuio/config.toml") 
         };
         let app_error = AppError::Configuration(config_error);
         

@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# Build PKG installer for OpenDLNA on macOS
+# Build PKG installer for VuIO on macOS
 # Creates a signed installer package for distribution
 
 set -e
 
 # Configuration
-BINARY_PATH="${1:-../../target/x86_64-apple-darwin/release/opendlna}"
+BINARY_PATH="${1:-../../target/x86_64-apple-darwin/release/vuio}"
 OUTPUT_DIR="${2:-../../builds}"
 VERSION="${3:-0.1.0}"
-PACKAGE_ID="com.opendlna.server"
+PACKAGE_ID="com.vuio.server"
 INSTALL_LOCATION="/usr/local/bin"
 SCRIPTS_DIR="scripts"
 TEMP_DIR="temp"
@@ -27,7 +27,7 @@ function show_help() {
     echo "Usage: $0 [BINARY_PATH] [OUTPUT_DIR] [VERSION]"
     echo ""
     echo "Arguments:"
-    echo "  BINARY_PATH   Path to the compiled opendlna binary (default: ../../target/x86_64-apple-darwin/release/opendlna)"
+    echo "  BINARY_PATH   Path to the compiled vuio binary (default: ../../target/x86_64-apple-darwin/release/vuio)"
     echo "  OUTPUT_DIR    Output directory for PKG file (default: ../../builds)"
     echo "  VERSION       Version number for the installer (default: 0.1.0)"
     echo ""
@@ -82,23 +82,23 @@ mkdir -p "$TEMP_DIR"
 # Create package root structure
 PKG_ROOT="$TEMP_DIR/pkg_root"
 mkdir -p "$PKG_ROOT$INSTALL_LOCATION"
-mkdir -p "$PKG_ROOT/usr/local/etc/opendlna"
-mkdir -p "$PKG_ROOT/usr/local/var/log/opendlna"
+mkdir -p "$PKG_ROOT/usr/local/etc/vuio"
+mkdir -p "$PKG_ROOT/usr/local/var/log/vuio"
 mkdir -p "$PKG_ROOT/Library/LaunchDaemons"
 
 # Copy binary
-cp "$BINARY_PATH" "$PKG_ROOT$INSTALL_LOCATION/opendlna"
-chmod +x "$PKG_ROOT$INSTALL_LOCATION/opendlna"
+cp "$BINARY_PATH" "$PKG_ROOT$INSTALL_LOCATION/vuio"
+chmod +x "$PKG_ROOT$INSTALL_LOCATION/vuio"
 
 # Create default configuration
-cat > "$PKG_ROOT/usr/local/etc/opendlna/opendlna.toml" << 'EOF'
-# OpenDLNA Server Configuration
-# This is the default configuration file for OpenDLNA
+cat > "$PKG_ROOT/usr/local/etc/vuio/vuio.toml" << 'EOF'
+# VuIO Server Configuration
+# This is the default configuration file for VuIO
 
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "12345678-1234-1234-1234-123456789012"
 
 [network]
@@ -130,33 +130,33 @@ backup_enabled = true
 EOF
 
 # Create LaunchDaemon plist for system service
-cat > "$PKG_ROOT/Library/LaunchDaemons/com.opendlna.server.plist" << EOF
+cat > "$PKG_ROOT/Library/LaunchDaemons/com.vuio.server.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.opendlna.server</string>
+    <string>com.vuio.server</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$INSTALL_LOCATION/opendlna</string>
+        <string>$INSTALL_LOCATION/vuio</string>
         <string>--config</string>
-        <string>/usr/local/etc/opendlna/opendlna.toml</string>
+        <string>/usr/local/etc/vuio/vuio.toml</string>
     </array>
     <key>RunAtLoad</key>
     <false/>
     <key>KeepAlive</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/usr/local/var/log/opendlna/opendlna.log</string>
+    <string>/usr/local/var/log/vuio/vuio.log</string>
     <key>StandardErrorPath</key>
-    <string>/usr/local/var/log/opendlna/opendlna.error.log</string>
+    <string>/usr/local/var/log/vuio/vuio.error.log</string>
     <key>WorkingDirectory</key>
-    <string>/usr/local/etc/opendlna</string>
+    <string>/usr/local/etc/vuio</string>
     <key>UserName</key>
-    <string>_opendlna</string>
+    <string>_vuio</string>
     <key>GroupName</key>
-    <string>_opendlna</string>
+    <string>_vuio</string>
 </dict>
 </plist>
 EOF
@@ -169,32 +169,32 @@ cat > "$SCRIPTS_DIR/preinstall" << 'EOF'
 #!/bin/bash
 
 # Stop the service if it's running
-if launchctl list | grep -q "com.opendlna.server"; then
-    echo "Stopping OpenDLNA service..."
-    launchctl unload /Library/LaunchDaemons/com.opendlna.server.plist 2>/dev/null || true
+if launchctl list | grep -q "com.vuio.server"; then
+    echo "Stopping VuIO service..."
+    launchctl unload /Library/LaunchDaemons/com.vuio.server.plist 2>/dev/null || true
 fi
 
 # Create user and group for the service
-if ! dscl . -read /Groups/_opendlna &>/dev/null; then
-    echo "Creating _opendlna group..."
-    dseditgroup -o create -q _opendlna
+if ! dscl . -read /Groups/_vuio &>/dev/null; then
+    echo "Creating _vuio group..."
+    dseditgroup -o create -q _vuio
 fi
 
-if ! dscl . -read /Users/_opendlna &>/dev/null; then
-    echo "Creating _opendlna user..."
+if ! dscl . -read /Users/_vuio &>/dev/null; then
+    echo "Creating _vuio user..."
     # Find next available UID starting from 200
     uid=200
     while dscl . -list /Users UniqueID | awk '{print $2}' | grep -q "^$uid$"; do
         ((uid++))
     done
     
-    dscl . -create /Users/_opendlna
-    dscl . -create /Users/_opendlna UserShell /usr/bin/false
-    dscl . -create /Users/_opendlna RealName "OpenDLNA Service"
-    dscl . -create /Users/_opendlna UniqueID $uid
-    dscl . -create /Users/_opendlna PrimaryGroupID 20
-    dscl . -create /Users/_opendlna NFSHomeDirectory /var/empty
-    dscl . -create /Users/_opendlna Password "*"
+    dscl . -create /Users/_vuio
+    dscl . -create /Users/_vuio UserShell /usr/bin/false
+    dscl . -create /Users/_vuio RealName "VuIO Service"
+    dscl . -create /Users/_vuio UniqueID $uid
+    dscl . -create /Users/_vuio PrimaryGroupID 20
+    dscl . -create /Users/_vuio NFSHomeDirectory /var/empty
+    dscl . -create /Users/_vuio Password "*"
 fi
 
 exit 0
@@ -205,24 +205,24 @@ cat > "$SCRIPTS_DIR/postinstall" << 'EOF'
 #!/bin/bash
 
 # Set proper permissions
-chown -R _opendlna:_opendlna /usr/local/var/log/opendlna
-chmod 755 /usr/local/bin/opendlna
-chmod 644 /Library/LaunchDaemons/com.opendlna.server.plist
-chmod 644 /usr/local/etc/opendlna/opendlna.toml
+chown -R _vuio:_vuio /usr/local/var/log/vuio
+chmod 755 /usr/local/bin/vuio
+chmod 644 /Library/LaunchDaemons/com.vuio.server.plist
+chmod 644 /usr/local/etc/vuio/vuio.toml
 
 # Load the LaunchDaemon (but don't start it automatically)
-launchctl load /Library/LaunchDaemons/com.opendlna.server.plist
+launchctl load /Library/LaunchDaemons/com.vuio.server.plist
 
-echo "OpenDLNA Server has been installed successfully!"
+echo "VuIO Server has been installed successfully!"
 echo ""
 echo "To start the service:"
-echo "  sudo launchctl start com.opendlna.server"
+echo "  sudo launchctl start com.vuio.server"
 echo ""
 echo "To stop the service:"
-echo "  sudo launchctl stop com.opendlna.server"
+echo "  sudo launchctl stop com.vuio.server"
 echo ""
-echo "Configuration file: /usr/local/etc/opendlna/opendlna.toml"
-echo "Log files: /usr/local/var/log/opendlna/"
+echo "Configuration file: /usr/local/etc/vuio/vuio.toml"
+echo "Log files: /usr/local/var/log/vuio/"
 echo ""
 
 exit 0
@@ -233,10 +233,10 @@ cat > "$SCRIPTS_DIR/preremove" << 'EOF'
 #!/bin/bash
 
 # Stop and unload the service
-if launchctl list | grep -q "com.opendlna.server"; then
-    echo "Stopping OpenDLNA service..."
-    launchctl stop com.opendlna.server 2>/dev/null || true
-    launchctl unload /Library/LaunchDaemons/com.opendlna.server.plist 2>/dev/null || true
+if launchctl list | grep -q "com.vuio.server"; then
+    echo "Stopping VuIO service..."
+    launchctl stop com.vuio.server 2>/dev/null || true
+    launchctl unload /Library/LaunchDaemons/com.vuio.server.plist 2>/dev/null || true
 fi
 
 exit 0
@@ -251,8 +251,8 @@ echo -e "${GREEN}✓ Build environment prepared${NC}"
 echo ""
 echo -e "${YELLOW}--- Building PKG Installer ---${NC}"
 
-PKG_FILE="opendlna-$VERSION-macos.pkg"
-COMPONENT_PKG="$TEMP_DIR/opendlna-component.pkg"
+PKG_FILE="vuio-$VERSION-macos.pkg"
+COMPONENT_PKG="$TEMP_DIR/vuio-component.pkg"
 
 # Create component package
 echo "Creating component package..."
@@ -267,8 +267,8 @@ pkgbuild --root "$PKG_ROOT" \
 cat > "$TEMP_DIR/distribution.xml" << EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="1">
-    <title>OpenDLNA Server</title>
-    <organization>com.opendlna</organization>
+    <title>VuIO Server</title>
+    <organization>com.vuio</organization>
     <domains enable_localSystem="true"/>
     <options customize="never" require-scripts="true" rootVolumeOnly="true" />
     
@@ -290,7 +290,7 @@ cat > "$TEMP_DIR/distribution.xml" << EOF
         <pkg-ref id="$PACKAGE_ID"/>
     </choice>
     
-    <pkg-ref id="$PACKAGE_ID" version="$VERSION" onConclusion="none">opendlna-component.pkg</pkg-ref>
+    <pkg-ref id="$PACKAGE_ID" version="$VERSION" onConclusion="none">vuio-component.pkg</pkg-ref>
 </installer-gui-script>
 EOF
 
@@ -307,9 +307,9 @@ cat > "$TEMP_DIR/welcome.html" << 'EOF'
     </style>
 </head>
 <body>
-    <h1>Welcome to OpenDLNA Server</h1>
-    <p>This installer will install OpenDLNA Server, a cross-platform DLNA media server that allows you to share your media files with DLNA-compatible devices on your network.</p>
-    <p>OpenDLNA Server will be installed as a system service that can be started and stopped using launchctl commands.</p>
+    <h1>Welcome to VuIO Server</h1>
+    <p>This installer will install VuIO Server, a cross-platform DLNA media server that allows you to share your media files with DLNA-compatible devices on your network.</p>
+    <p>VuIO Server will be installed as a system service that can be started and stopped using launchctl commands.</p>
 </body>
 </html>
 EOF
@@ -352,23 +352,23 @@ cat > "$TEMP_DIR/conclusion.html" << 'EOF'
 </head>
 <body>
     <h1>Installation Complete</h1>
-    <p>OpenDLNA Server has been successfully installed!</p>
+    <p>VuIO Server has been successfully installed!</p>
     
     <h2>Getting Started</h2>
-    <p>To start the OpenDLNA service, open Terminal and run:</p>
-    <p><code>sudo launchctl start com.opendlna.server</code></p>
+    <p>To start the VuIO service, open Terminal and run:</p>
+    <p><code>sudo launchctl start com.vuio.server</code></p>
     
     <p>To stop the service:</p>
-    <p><code>sudo launchctl stop com.opendlna.server</code></p>
+    <p><code>sudo launchctl stop com.vuio.server</code></p>
     
     <h2>Configuration</h2>
     <p>The configuration file is located at:</p>
-    <p><code>/usr/local/etc/opendlna/opendlna.toml</code></p>
+    <p><code>/usr/local/etc/vuio/vuio.toml</code></p>
     
     <p>Log files can be found at:</p>
-    <p><code>/usr/local/var/log/opendlna/</code></p>
+    <p><code>/usr/local/var/log/vuio/</code></p>
     
-    <p>For more information, visit the OpenDLNA project page.</p>
+    <p>For more information, visit the VuIO project page.</p>
 </body>
 </html>
 EOF

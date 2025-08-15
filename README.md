@@ -1,4 +1,4 @@
-# OpenDLNA Media Server
+# VuIO Media Server
 
 A comprehensive, cross-platform DLNA/UPnP media server written in Rust with advanced platform integration, real-time file monitoring, and robust database management. Built with Axum, Tokio, and SQLite for high performance and reliability.
 
@@ -55,26 +55,26 @@ A comprehensive, cross-platform DLNA/UPnP media server written in Rust with adva
 
 ### Build from Source
 ```bash
-git clone https://github.com/yourusername/opendlna.git
-cd opendlna
+git clone https://github.com/yourusername/vuio.git
+cd vuio
 cargo build --release
 ```
 
 ### Quick Start
 ```bash
 # Run with default settings (scans ~/Videos, ~/Music, ~/Pictures)
-./target/release/opendlna
+./target/release/vuio
 
 # Specify a custom media directory
-./target/release/opendlna /path/to/your/media
+./target/release/vuio /path/to/your/media
 
 # Custom port and server name
-./target/release/opendlna -p 9090 -n "My Media Server" /path/to/media
+./target/release/vuio -p 9090 -n "My Media Server" /path/to/media
 ```
 
 ### Command Line Options
 ```
-Usage: opendlna [OPTIONS] [MEDIA_DIR]
+Usage: vuio [OPTIONS] [MEDIA_DIR]
 
 Arguments:
   [MEDIA_DIR]  The directory containing media files to serve
@@ -88,19 +88,19 @@ Options:
 
 ## ⚙️ Configuration
 
-OpenDLNA uses a TOML configuration file with platform-specific defaults:
+VuIO uses a TOML configuration file with platform-specific defaults:
 
 **Configuration Locations:**
-- **Windows:** `%APPDATA%\OpenDLNA\config.toml`
-- **macOS:** `~/Library/Application Support/OpenDLNA/config.toml`
-- **Linux:** `~/.config/opendlna/config.toml`
+- **Windows:** `%APPDATA%\VuIO\config.toml`
+- **macOS:** `~/Library/Application Support/VuIO/config.toml`
+- **Linux:** `~/.config/vuio/config.toml`
 
 ### Example Configuration
 ```toml
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "auto-generated"
 
 [network]
@@ -116,7 +116,7 @@ extensions = ["mp4", "mkv", "avi"]
 exclude_patterns = ["*.tmp", ".*"]
 
 [database]
-path = "~/.local/share/opendlna/media.db"
+path = "~/.local/share/vuio/media.db"
 vacuum_on_startup = false
 backup_enabled = true
 ```
@@ -143,7 +143,7 @@ backup_enabled = true
 
 ## 🏗️ Architecture
 
-OpenDLNA is built with a modular, cross-platform architecture:
+VuIO is built with a modular, cross-platform architecture:
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -209,16 +209,16 @@ netstat -tulpn | grep :8080  # Linux
 netstat -an | grep :8080     # macOS/Windows
 
 # Use a different port
-./opendlna -p 9090
+./vuio -p 9090
 ```
 
 **Permission Denied**
 ```bash
 # Linux: Use capabilities instead of root
-sudo setcap 'cap_net_bind_service=+ep' ./target/release/opendlna
+sudo setcap 'cap_net_bind_service=+ep' ./target/release/vuio
 
 # Or run on unprivileged port
-./opendlna -p 8080
+./vuio -p 8080
 ```
 
 **No Media Files Found**
@@ -237,7 +237,7 @@ sudo setcap 'cap_net_bind_service=+ep' ./target/release/opendlna
 
 Generate a diagnostic report:
 ```bash
-RUST_LOG=debug ./opendlna 2>&1 | tee opendlna-debug.log
+RUST_LOG=debug ./vuio 2>&1 | tee vuio-debug.log
 ```
 
 The application provides comprehensive startup diagnostics including:
@@ -270,4 +270,4 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 
 ---
 
-**OpenDLNA** - Stream your media, anywhere, on any platform. 🎬🎵📷
+**VuIO** - Stream your media, anywhere, on any platform. 🎬🎵📷

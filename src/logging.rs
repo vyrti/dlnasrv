@@ -50,7 +50,7 @@ pub fn init_logging_with_options(log_level: Option<&str>, log_file: Option<PathB
 
 /// Log comprehensive startup information including diagnostics
 pub async fn log_startup_info() -> Result<(), PlatformError> {
-    info!("=== OpenDLNA Server Starting ===");
+    info!("=== VuIO Server Starting ===");
     
     // Perform startup diagnostic checks
     StartupDiagnostics::perform_startup_checks().await?;
@@ -270,7 +270,7 @@ pub async fn log_periodic_status(
 
 /// Log shutdown information
 pub async fn log_shutdown_info(graceful: bool, uptime_seconds: u64) {
-    info!("=== OpenDLNA Server Shutting Down ===");
+    info!("=== VuIO Server Shutting Down ===");
     
     let shutdown_type = if graceful { "Graceful" } else { "Forced" };
     info!("Shutdown type: {}", shutdown_type);

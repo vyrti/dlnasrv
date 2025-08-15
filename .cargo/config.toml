@@ -1,4 +1,4 @@
-# Cross-platform Cargo configuration for OpenDLNA
+# Cross-platform Cargo configuration for VuIO
 
 # Cross-compilation targets and linkers
 [target.x86_64-pc-windows-gnu]

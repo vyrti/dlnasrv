@@ -1,4 +1,4 @@
-# OpenDLNA Server - Linux Setup and Configuration Guide
+# VuIO Server - Linux Setup and Configuration Guide
 
 ## Installation
 
@@ -8,37 +8,37 @@
 
 1. **Download and install the DEB package**:
    ```bash
-   wget https://github.com/opendlna/opendlna/releases/latest/download/opendlna_amd64.deb
-   sudo dpkg -i opendlna_amd64.deb
+   wget https://github.com/vuio/vuio/releases/latest/download/vuio_amd64.deb
+   sudo dpkg -i vuio_amd64.deb
    sudo apt-get install -f  # Fix any dependency issues
    ```
 
 2. **Enable and start the service**:
    ```bash
-   sudo systemctl enable opendlna
-   sudo systemctl start opendlna
+   sudo systemctl enable vuio
+   sudo systemctl start vuio
    ```
 
 #### Option 2: APT Repository
 
-1. **Add the OpenDLNA repository**:
+1. **Add the VuIO repository**:
    ```bash
-   curl -fsSL https://repo.opendlna.org/gpg | sudo gpg --dearmor -o /usr/share/keyrings/opendlna-archive-keyring.gpg
-   echo "deb [signed-by=/usr/share/keyrings/opendlna-archive-keyring.gpg] https://repo.opendlna.org/ubuntu $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/opendlna.list
+   curl -fsSL https://repo.vuio.org/gpg | sudo gpg --dearmor -o /usr/share/keyrings/vuio-archive-keyring.gpg
+   echo "deb [signed-by=/usr/share/keyrings/vuio-archive-keyring.gpg] https://repo.vuio.org/ubuntu $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/vuio.list
    ```
 
 2. **Update and install**:
    ```bash
    sudo apt update
-   sudo apt install opendlna
+   sudo apt install vuio
    ```
 
 #### Option 3: Snap Package
 
 ```bash
-sudo snap install opendlna
-sudo snap connect opendlna:network-control
-sudo snap connect opendlna:removable-media
+sudo snap install vuio
+sudo snap connect vuio:network-control
+sudo snap connect vuio:removable-media
 ```
 
 ### CentOS/RHEL/Fedora
@@ -48,40 +48,40 @@ sudo snap connect opendlna:removable-media
 1. **Download and install the RPM package**:
    ```bash
    # For CentOS/RHEL 8+
-   wget https://github.com/opendlna/opendlna/releases/latest/download/opendlna-x86_64.rpm
-   sudo dnf install opendlna-x86_64.rpm
+   wget https://github.com/vuio/vuio/releases/latest/download/vuio-x86_64.rpm
+   sudo dnf install vuio-x86_64.rpm
    
    # For CentOS/RHEL 7
-   sudo yum install opendlna-x86_64.rpm
+   sudo yum install vuio-x86_64.rpm
    ```
 
 2. **Enable and start the service**:
    ```bash
-   sudo systemctl enable opendlna
-   sudo systemctl start opendlna
+   sudo systemctl enable vuio
+   sudo systemctl start vuio
    ```
 
 #### Option 2: YUM/DNF Repository
 
-1. **Add the OpenDLNA repository**:
+1. **Add the VuIO repository**:
    ```bash
-   sudo tee /etc/yum.repos.d/opendlna.repo << 'EOF'
-   [opendlna]
-   name=OpenDLNA Repository
-   baseurl=https://repo.opendlna.org/centos/$releasever/$basearch/
+   sudo tee /etc/yum.repos.d/vuio.repo << 'EOF'
+   [vuio]
+   name=VuIO Repository
+   baseurl=https://repo.vuio.org/centos/$releasever/$basearch/
    enabled=1
    gpgcheck=1
-   gpgkey=https://repo.opendlna.org/gpg
+   gpgkey=https://repo.vuio.org/gpg
    EOF
    ```
 
 2. **Install**:
    ```bash
    # CentOS/RHEL 8+
-   sudo dnf install opendlna
+   sudo dnf install vuio
    
    # CentOS/RHEL 7
-   sudo yum install opendlna
+   sudo yum install vuio
    ```
 
 ### Arch Linux
@@ -90,24 +90,24 @@ sudo snap connect opendlna:removable-media
 
 ```bash
 # Using yay
-yay -S opendlna
+yay -S vuio
 
 # Using paru
-paru -S opendlna
+paru -S vuio
 
 # Manual AUR installation
-git clone https://aur.archlinux.org/opendlna.git
-cd opendlna
+git clone https://aur.archlinux.org/vuio.git
+cd vuio
 makepkg -si
 ```
 
 #### Option 2: Manual Installation
 
 ```bash
-wget https://github.com/opendlna/opendlna/releases/latest/download/opendlna-linux-x86_64.tar.gz
-tar -xzf opendlna-linux-x86_64.tar.gz
-sudo cp opendlna /usr/local/bin/
-sudo chmod +x /usr/local/bin/opendlna
+wget https://github.com/vuio/vuio/releases/latest/download/vuio-linux-x86_64.tar.gz
+tar -xzf vuio-linux-x86_64.tar.gz
+sudo cp vuio /usr/local/bin/
+sudo chmod +x /usr/local/bin/vuio
 ```
 
 ### openSUSE
@@ -115,16 +115,16 @@ sudo chmod +x /usr/local/bin/opendlna
 #### Option 1: Zypper Repository
 
 ```bash
-sudo zypper addrepo https://repo.opendlna.org/opensuse/tumbleweed/ opendlna
+sudo zypper addrepo https://repo.vuio.org/opensuse/tumbleweed/ vuio
 sudo zypper refresh
-sudo zypper install opendlna
+sudo zypper install vuio
 ```
 
 #### Option 2: RPM Package
 
 ```bash
-wget https://github.com/opendlna/opendlna/releases/latest/download/opendlna-opensuse-x86_64.rpm
-sudo zypper install opendlna-opensuse-x86_64.rpm
+wget https://github.com/vuio/vuio/releases/latest/download/vuio-opensuse-x86_64.rpm
+sudo zypper install vuio-opensuse-x86_64.rpm
 ```
 
 ### Generic Linux (Binary)
@@ -133,27 +133,27 @@ For distributions not listed above:
 
 ```bash
 # Download and install binary
-wget https://github.com/opendlna/opendlna/releases/latest/download/opendlna-linux-x86_64.tar.gz
-tar -xzf opendlna-linux-x86_64.tar.gz
-sudo cp opendlna /usr/local/bin/
-sudo chmod +x /usr/local/bin/opendlna
+wget https://github.com/vuio/vuio/releases/latest/download/vuio-linux-x86_64.tar.gz
+tar -xzf vuio-linux-x86_64.tar.gz
+sudo cp vuio /usr/local/bin/
+sudo chmod +x /usr/local/bin/vuio
 
 # Create user and directories
-sudo useradd -r -s /bin/false opendlna
-sudo mkdir -p /etc/opendlna /var/lib/opendlna /var/log/opendlna
-sudo chown opendlna:opendlna /var/lib/opendlna /var/log/opendlna
+sudo useradd -r -s /bin/false vuio
+sudo mkdir -p /etc/vuio /var/lib/vuio /var/log/vuio
+sudo chown vuio:vuio /var/lib/vuio /var/log/vuio
 ```
 
 ## Configuration
 
 ### Configuration File Locations
 
-OpenDLNA follows the XDG Base Directory Specification:
+VuIO follows the XDG Base Directory Specification:
 
-- **System-wide config**: `/etc/opendlna/config.toml`
-- **User config**: `~/.config/opendlna/config.toml`
-- **Database**: `~/.local/share/opendlna/media.db` (user) or `/var/lib/opendlna/media.db` (system)
-- **Logs**: `~/.local/share/opendlna/logs/` (user) or `/var/log/opendlna/` (system)
+- **System-wide config**: `/etc/vuio/config.toml`
+- **User config**: `~/.config/vuio/config.toml`
+- **Database**: `~/.local/share/vuio/media.db` (user) or `/var/lib/vuio/media.db` (system)
+- **Logs**: `~/.local/share/vuio/logs/` (user) or `/var/log/vuio/` (system)
 
 ### Default Configuration
 
@@ -161,7 +161,7 @@ OpenDLNA follows the XDG Base Directory Specification:
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "auto-generated-uuid"
 
 [network]
@@ -188,20 +188,20 @@ path = "~/Pictures"
 recursive = true
 
 [database]
-path = "~/.local/share/opendlna/media.db"
+path = "~/.local/share/vuio/media.db"
 vacuum_on_startup = false
 backup_enabled = true
 ```
 
 ### System-wide Configuration
 
-For system-wide installation, create `/etc/opendlna/config.toml`:
+For system-wide installation, create `/etc/vuio/config.toml`:
 
 ```toml
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 
 [network]
 ssdp_port = 1900
@@ -224,39 +224,39 @@ path = "/srv/media/pictures"
 recursive = true
 
 [database]
-path = "/var/lib/opendlna/media.db"
+path = "/var/lib/vuio/media.db"
 ```
 
 ## Systemd Service Configuration
 
 ### Service File
 
-The package installation creates `/etc/systemd/system/opendlna.service`:
+The package installation creates `/etc/systemd/system/vuio.service`:
 
 ```ini
 [Unit]
-Description=OpenDLNA Media Server
+Description=VuIO Media Server
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-User=opendlna
-Group=opendlna
-ExecStart=/usr/local/bin/opendlna
+User=vuio
+Group=vuio
+ExecStart=/usr/local/bin/vuio
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=opendlna
+SyslogIdentifier=vuio
 
 # Security settings
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/opendlna /var/log/opendlna /srv/media
+ReadWritePaths=/var/lib/vuio /var/log/vuio /srv/media
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -282,25 +282,25 @@ WantedBy=multi-user.target
 
 ```bash
 # Enable service to start at boot
-sudo systemctl enable opendlna
+sudo systemctl enable vuio
 
 # Start service
-sudo systemctl start opendlna
+sudo systemctl start vuio
 
 # Stop service
-sudo systemctl stop opendlna
+sudo systemctl stop vuio
 
 # Restart service
-sudo systemctl restart opendlna
+sudo systemctl restart vuio
 
 # Check status
-sudo systemctl status opendlna
+sudo systemctl status vuio
 
 # View logs
-sudo journalctl -u opendlna -f
+sudo journalctl -u vuio -f
 
 # Reload configuration
-sudo systemctl reload opendlna
+sudo systemctl reload vuio
 ```
 
 ## Security Configuration
@@ -318,14 +318,14 @@ getenforce
 
 1. **Generate policy from audit logs**:
    ```bash
-   # Run OpenDLNA and check for denials
-   sudo ausearch -m avc -ts recent | grep opendlna
+   # Run VuIO and check for denials
+   sudo ausearch -m avc -ts recent | grep vuio
    
    # Generate policy
-   sudo ausearch -m avc -ts recent | grep opendlna | audit2allow -M opendlna_policy
+   sudo ausearch -m avc -ts recent | grep vuio | audit2allow -M vuio_policy
    
    # Install policy
-   sudo semodule -i opendlna_policy.pp
+   sudo semodule -i vuio_policy.pp
    ```
 
 2. **Manual SELinux configuration**:
@@ -334,18 +334,18 @@ getenforce
    sudo setsebool -P httpd_can_network_connect 1
    
    # Allow file access
-   sudo semanage fcontext -a -t httpd_exec_t "/usr/local/bin/opendlna"
-   sudo semanage fcontext -a -t var_lib_t "/var/lib/opendlna(/.*)?"
-   sudo semanage fcontext -a -t var_log_t "/var/log/opendlna(/.*)?"
-   sudo restorecon -R /usr/local/bin/opendlna /var/lib/opendlna /var/log/opendlna
+   sudo semanage fcontext -a -t httpd_exec_t "/usr/local/bin/vuio"
+   sudo semanage fcontext -a -t var_lib_t "/var/lib/vuio(/.*)?"
+   sudo semanage fcontext -a -t var_log_t "/var/log/vuio(/.*)?"
+   sudo restorecon -R /usr/local/bin/vuio /var/lib/vuio /var/log/vuio
    ```
 
 #### Custom SELinux Policy
 
-Create `/etc/selinux/local/opendlna.te`:
+Create `/etc/selinux/local/vuio.te`:
 
 ```
-module opendlna 1.0;
+module vuio 1.0;
 
 require {
     type unconfined_t;
@@ -355,43 +355,43 @@ require {
     class udp_socket { bind create };
 }
 
-# Allow OpenDLNA to bind to HTTP and SSDP ports
+# Allow VuIO to bind to HTTP and SSDP ports
 allow unconfined_t http_port_t:tcp_socket { bind create listen };
 allow unconfined_t unreserved_port_t:udp_socket { bind create };
 ```
 
 Compile and install:
 ```bash
-checkmodule -M -m -o opendlna.mod opendlna.te
-semodule_package -o opendlna.pp -m opendlna.mod
-sudo semodule -i opendlna.pp
+checkmodule -M -m -o vuio.mod vuio.te
+semodule_package -o vuio.pp -m vuio.mod
+sudo semodule -i vuio.pp
 ```
 
 ### AppArmor (Ubuntu/Debian)
 
 #### Create AppArmor Profile
 
-Create `/etc/apparmor.d/usr.local.bin.opendlna`:
+Create `/etc/apparmor.d/usr.local.bin.vuio`:
 
 ```
 #include <tunables/global>
 
-/usr/local/bin/opendlna {
+/usr/local/bin/vuio {
   #include <abstractions/base>
   #include <abstractions/nameservice>
   #include <abstractions/user-tmp>
 
   # Binary execution
-  /usr/local/bin/opendlna mr,
+  /usr/local/bin/vuio mr,
 
   # Configuration files
-  /etc/opendlna/** r,
-  owner @{HOME}/.config/opendlna/** rw,
+  /etc/vuio/** r,
+  owner @{HOME}/.config/vuio/** rw,
 
   # Database and logs
-  /var/lib/opendlna/** rw,
-  /var/log/opendlna/** rw,
-  owner @{HOME}/.local/share/opendlna/** rw,
+  /var/lib/vuio/** rw,
+  /var/log/vuio/** rw,
+  owner @{HOME}/.local/share/vuio/** rw,
 
   # Media directories
   /srv/media/** r,
@@ -421,8 +421,8 @@ Create `/etc/apparmor.d/usr.local.bin.opendlna`:
 
 Enable the profile:
 ```bash
-sudo apparmor_parser -r /etc/apparmor.d/usr.local.bin.opendlna
-sudo aa-enforce /usr/local/bin/opendlna
+sudo apparmor_parser -r /etc/apparmor.d/usr.local.bin.vuio
+sudo aa-enforce /usr/local/bin/vuio
 ```
 
 ### Firewall Configuration
@@ -430,9 +430,9 @@ sudo aa-enforce /usr/local/bin/opendlna
 #### UFW (Ubuntu)
 
 ```bash
-# Allow OpenDLNA ports
-sudo ufw allow 8080/tcp comment 'OpenDLNA HTTP'
-sudo ufw allow 1900/udp comment 'OpenDLNA SSDP'
+# Allow VuIO ports
+sudo ufw allow 8080/tcp comment 'VuIO HTTP'
+sudo ufw allow 1900/udp comment 'VuIO SSDP'
 
 # Allow from local network only
 sudo ufw allow from 192.168.0.0/16 to any port 8080
@@ -445,14 +445,14 @@ sudo ufw enable
 #### firewalld (CentOS/RHEL/Fedora)
 
 ```bash
-# Add OpenDLNA service
-sudo firewall-cmd --permanent --new-service=opendlna
-sudo firewall-cmd --permanent --service=opendlna --set-description="OpenDLNA Media Server"
-sudo firewall-cmd --permanent --service=opendlna --add-port=8080/tcp
-sudo firewall-cmd --permanent --service=opendlna --add-port=1900/udp
+# Add VuIO service
+sudo firewall-cmd --permanent --new-service=vuio
+sudo firewall-cmd --permanent --service=vuio --set-description="VuIO Media Server"
+sudo firewall-cmd --permanent --service=vuio --add-port=8080/tcp
+sudo firewall-cmd --permanent --service=vuio --add-port=1900/udp
 
 # Enable service
-sudo firewall-cmd --permanent --add-service=opendlna
+sudo firewall-cmd --permanent --add-service=vuio
 sudo firewall-cmd --reload
 
 # Or add ports directly
@@ -464,7 +464,7 @@ sudo firewall-cmd --reload
 #### iptables (Generic)
 
 ```bash
-# Allow OpenDLNA ports
+# Allow VuIO ports
 sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
 sudo iptables -A INPUT -p udp --dport 1900 -j ACCEPT
 
@@ -491,25 +491,25 @@ sudo service iptables save
 
 1. **Check user permissions**:
    ```bash
-   # Ensure opendlna user exists
-   id opendlna
+   # Ensure vuio user exists
+   id vuio
    
    # Fix directory permissions
-   sudo chown -R opendlna:opendlna /var/lib/opendlna /var/log/opendlna
-   sudo chmod -R 755 /var/lib/opendlna
-   sudo chmod -R 644 /var/log/opendlna
+   sudo chown -R vuio:vuio /var/lib/vuio /var/log/vuio
+   sudo chmod -R 755 /var/lib/vuio
+   sudo chmod -R 644 /var/log/vuio
    ```
 
 2. **Grant capability to bind privileged ports**:
    ```bash
-   sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/opendlna
+   sudo setcap 'cap_net_bind_service=+ep' /usr/local/bin/vuio
    ```
 
 3. **Use systemd socket activation**:
-   Create `/etc/systemd/system/opendlna.socket`:
+   Create `/etc/systemd/system/vuio.socket`:
    ```ini
    [Unit]
-   Description=OpenDLNA Socket
+   Description=VuIO Socket
    
    [Socket]
    ListenStream=8080
@@ -529,7 +529,7 @@ sudo service iptables save
 **Diagnostics:**
 ```bash
 # SELinux
-sudo ausearch -m avc -ts recent | grep opendlna
+sudo ausearch -m avc -ts recent | grep vuio
 sudo sealert -a /var/log/audit/audit.log
 
 # AppArmor
@@ -545,7 +545,7 @@ sudo aa-status
   sudo setenforce 0
   
   # AppArmor
-  sudo aa-disable /usr/local/bin/opendlna
+  sudo aa-disable /usr/local/bin/vuio
   ```
 
 #### 3. Network Discovery Issues
@@ -625,13 +625,13 @@ sudo ufw status verbose
 
 3. **Use ionice and nice**:
    ```bash
-   sudo systemctl edit opendlna
+   sudo systemctl edit vuio
    ```
    Add:
    ```ini
    [Service]
    ExecStart=
-   ExecStart=/usr/bin/ionice -c 3 /usr/bin/nice -n 10 /usr/local/bin/opendlna
+   ExecStart=/usr/bin/ionice -c 3 /usr/bin/nice -n 10 /usr/local/bin/vuio
    ```
 
 ### Distribution-Specific Issues
@@ -641,18 +641,18 @@ sudo ufw status verbose
 1. **Snap confinement issues**:
    ```bash
    # Connect required interfaces
-   sudo snap connect opendlna:network-control
-   sudo snap connect opendlna:removable-media
-   sudo snap connect opendlna:home
+   sudo snap connect vuio:network-control
+   sudo snap connect vuio:removable-media
+   sudo snap connect vuio:home
    ```
 
 2. **AppArmor profile conflicts**:
    ```bash
    # Check for conflicting profiles
-   sudo aa-status | grep opendlna
+   sudo aa-status | grep vuio
    
    # Disable conflicting profiles
-   sudo aa-disable /snap/opendlna/current/bin/opendlna
+   sudo aa-disable /snap/vuio/current/bin/vuio
    ```
 
 #### CentOS/RHEL
@@ -667,7 +667,7 @@ sudo ufw status verbose
 2. **Firewalld rich rules**:
    ```bash
    # Allow only from local network
-   sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.0.0/16" service name="opendlna" accept'
+   sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.0.0/16" service name="vuio" accept'
    ```
 
 #### Arch Linux
@@ -681,8 +681,8 @@ sudo ufw status verbose
 2. **User service instead of system service**:
    ```bash
    # Enable user service
-   systemctl --user enable opendlna
-   systemctl --user start opendlna
+   systemctl --user enable vuio
+   systemctl --user start vuio
    ```
 
 ### Network Troubleshooting
@@ -744,31 +744,31 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN wget https://github.com/opendlna/opendlna/releases/latest/download/opendlna-linux-x86_64.tar.gz \
-    && tar -xzf opendlna-linux-x86_64.tar.gz \
-    && mv opendlna /usr/local/bin/ \
-    && chmod +x /usr/local/bin/opendlna
+RUN wget https://github.com/vuio/vuio/releases/latest/download/vuio-linux-x86_64.tar.gz \
+    && tar -xzf vuio-linux-x86_64.tar.gz \
+    && mv vuio /usr/local/bin/ \
+    && chmod +x /usr/local/bin/vuio
 
-RUN useradd -r -s /bin/false opendlna \
-    && mkdir -p /var/lib/opendlna /var/log/opendlna \
-    && chown opendlna:opendlna /var/lib/opendlna /var/log/opendlna
+RUN useradd -r -s /bin/false vuio \
+    && mkdir -p /var/lib/vuio /var/log/vuio \
+    && chown vuio:vuio /var/lib/vuio /var/log/vuio
 
-USER opendlna
+USER vuio
 EXPOSE 8080/tcp 1900/udp
 
-CMD ["/usr/local/bin/opendlna"]
+CMD ["/usr/local/bin/vuio"]
 ```
 
 Run with Docker:
 ```bash
-docker build -t opendlna .
+docker build -t vuio .
 docker run -d \
-  --name opendlna \
+  --name vuio \
   --network host \
   -v /path/to/media:/srv/media:ro \
-  -v /path/to/config:/etc/opendlna:ro \
-  -v opendlna-data:/var/lib/opendlna \
-  opendlna
+  -v /path/to/config:/etc/vuio:ro \
+  -v vuio-data:/var/lib/vuio \
+  vuio
 ```
 
 #### Docker Compose
@@ -777,20 +777,20 @@ docker run -d \
 version: '3.8'
 
 services:
-  opendlna:
+  vuio:
     build: .
-    container_name: opendlna
+    container_name: vuio
     network_mode: host
     volumes:
       - /path/to/media:/srv/media:ro
-      - ./config.toml:/etc/opendlna/config.toml:ro
-      - opendlna-data:/var/lib/opendlna
+      - ./config.toml:/etc/vuio/config.toml:ro
+      - vuio-data:/var/lib/vuio
     restart: unless-stopped
     environment:
       - RUST_LOG=info
 
 volumes:
-  opendlna-data:
+  vuio-data:
 ```
 
 ### Performance Tuning
@@ -823,7 +823,7 @@ For media storage:
 /dev/sdb1 /srv/media ext4 defaults,noatime,nodiratime 0 2
 
 # For databases (if on separate partition)
-/dev/sdc1 /var/lib/opendlna ext4 defaults,noatime 0 2
+/dev/sdc1 /var/lib/vuio ext4 defaults,noatime 0 2
 ```
 
 #### Systemd Service Optimization
@@ -851,39 +851,39 @@ ProtectSystem=false
 
 ```bash
 # View logs
-sudo journalctl -u opendlna
+sudo journalctl -u vuio
 
 # Follow logs
-sudo journalctl -u opendlna -f
+sudo journalctl -u vuio -f
 
 # Filter by priority
-sudo journalctl -u opendlna -p err
+sudo journalctl -u vuio -p err
 
 # Show logs since boot
-sudo journalctl -u opendlna -b
+sudo journalctl -u vuio -b
 ```
 
 ### Log Rotation
 
-Create `/etc/logrotate.d/opendlna`:
+Create `/etc/logrotate.d/vuio`:
 ```
-/var/log/opendlna/*.log {
+/var/log/vuio/*.log {
     daily
     missingok
     rotate 7
     compress
     delaycompress
     notifempty
-    create 644 opendlna opendlna
+    create 644 vuio vuio
     postrotate
-        systemctl reload opendlna
+        systemctl reload vuio
     endscript
 }
 ```
 
 ### Monitoring with Prometheus
 
-Add to OpenDLNA configuration:
+Add to VuIO configuration:
 ```toml
 [monitoring]
 prometheus_enabled = true
@@ -893,19 +893,19 @@ metrics_path = "/metrics"
 
 ### Health Checks
 
-Create health check script `/usr/local/bin/opendlna-health`:
+Create health check script `/usr/local/bin/vuio-health`:
 ```bash
 #!/bin/bash
 
 # Check if service is running
-if ! systemctl is-active --quiet opendlna; then
-    echo "CRITICAL: OpenDLNA service is not running"
+if ! systemctl is-active --quiet vuio; then
+    echo "CRITICAL: VuIO service is not running"
     exit 2
 fi
 
 # Check if port is listening
 if ! ss -tulpn | grep -q ":8080"; then
-    echo "CRITICAL: OpenDLNA is not listening on port 8080"
+    echo "CRITICAL: VuIO is not listening on port 8080"
     exit 2
 fi
 
@@ -915,7 +915,7 @@ if ! ss -tulpn | grep -q ":1900"; then
     exit 1
 fi
 
-echo "OK: OpenDLNA is running and listening on required ports"
+echo "OK: VuIO is running and listening on required ports"
 exit 0
 ```
 
@@ -929,8 +929,8 @@ For support requests, collect system information:
 #!/bin/bash
 # Create support bundle
 
-mkdir -p opendlna-support
-cd opendlna-support
+mkdir -p vuio-support
+cd vuio-support
 
 # System information
 uname -a > system_info.txt
@@ -943,10 +943,10 @@ ip addr show > network_interfaces.txt
 ip route show > routing_table.txt
 ss -tulpn > listening_ports.txt
 
-# OpenDLNA specific
-systemctl status opendlna > service_status.txt
-journalctl -u opendlna --no-pager > service_logs.txt
-cp /etc/opendlna/config.toml config.toml 2>/dev/null || echo "No system config found" > config.toml
+# VuIO specific
+systemctl status vuio > service_status.txt
+journalctl -u vuio --no-pager > service_logs.txt
+cp /etc/vuio/config.toml config.toml 2>/dev/null || echo "No system config found" > config.toml
 
 # Security information
 sestatus > selinux_status.txt 2>/dev/null || echo "SELinux not available" > selinux_status.txt
@@ -959,8 +959,8 @@ ufw status verbose > ufw_status.txt 2>/dev/null || echo "ufw not available" > uf
 
 # Create archive
 cd ..
-tar -czf opendlna-support-$(date +%Y%m%d-%H%M%S).tar.gz opendlna-support/
-echo "Support bundle created: opendlna-support-$(date +%Y%m%d-%H%M%S).tar.gz"
+tar -czf vuio-support-$(date +%Y%m%d-%H%M%S).tar.gz vuio-support/
+echo "Support bundle created: vuio-support-$(date +%Y%m%d-%H%M%S).tar.gz"
 ```
 
 ### Common Support Information
@@ -968,18 +968,18 @@ echo "Support bundle created: opendlna-support-$(date +%Y%m%d-%H%M%S).tar.gz"
 When reporting issues, include:
 
 1. **Linux distribution and version**
-2. **OpenDLNA version** (`opendlna --version`)
+2. **VuIO version** (`vuio --version`)
 3. **Installation method** (package, binary, container)
 4. **Configuration file** (remove sensitive information)
-5. **Service logs** (`journalctl -u opendlna`)
+5. **Service logs** (`journalctl -u vuio`)
 6. **Network configuration** (`ip addr`, `ip route`)
 7. **Firewall status** and rules
 8. **SELinux/AppArmor status** if applicable
 
 ### Community Resources
 
-- **GitHub Issues**: https://github.com/opendlna/opendlna/issues
-- **Documentation**: https://docs.opendlna.org
-- **Community Forum**: https://community.opendlna.org
-- **IRC**: #opendlna on Libera.Chat
-- **Matrix**: #opendlna:matrix.org
+- **GitHub Issues**: https://github.com/vuio/vuio/issues
+- **Documentation**: https://docs.vuio.org
+- **Community Forum**: https://community.vuio.org
+- **IRC**: #vuio on Libera.Chat
+- **Matrix**: #vuio:matrix.org

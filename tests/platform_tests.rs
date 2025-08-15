@@ -3,19 +3,19 @@
 //! This module contains tests that verify platform-specific functionality
 //! works correctly on Windows, macOS, and Linux systems.
 
-use opendlna::platform::{PlatformInfo, OsType, PlatformCapabilities};
-use opendlna::platform::network::{NetworkManager, BaseNetworkManager, SsdpConfig};
-use opendlna::platform::filesystem::{FileSystemManager, BaseFileSystemManager, create_platform_filesystem_manager};
-use opendlna::database::{DatabaseManager, SqliteDatabase, MediaFile};
-use opendlna::watcher::{FileSystemWatcher, CrossPlatformWatcher, FileSystemEvent};
+use vuio::platform::{PlatformInfo, OsType, PlatformCapabilities};
+use vuio::platform::network::{NetworkManager, BaseNetworkManager, SsdpConfig};
+use vuio::platform::filesystem::{FileSystemManager, BaseFileSystemManager, create_platform_filesystem_manager};
+use vuio::database::{DatabaseManager, SqliteDatabase, MediaFile};
+use vuio::watcher::{FileSystemWatcher, CrossPlatformWatcher, FileSystemEvent};
 
 // Platform-specific network managers
 #[cfg(target_os = "windows")]
-use opendlna::platform::network::WindowsNetworkManager;
+use vuio::platform::network::WindowsNetworkManager;
 #[cfg(target_os = "macos")]
-use opendlna::platform::network::MacOSNetworkManager;
+use vuio::platform::network::MacOSNetworkManager;
 #[cfg(target_os = "linux")]
-use opendlna::platform::network::LinuxNetworkManager;
+use vuio::platform::network::LinuxNetworkManager;
 
 // Create a type alias for the current platform's network manager
 #[cfg(target_os = "windows")]
@@ -38,8 +38,8 @@ mod network_tests {
     #[cfg(target_os = "windows")]
     mod windows_tests {
         use super::*;
-        use opendlna::platform::network::WindowsNetworkManager;
-        use opendlna::platform::error::WindowsError;
+        use vuio::platform::network::WindowsNetworkManager;
+        use vuio::platform::error::WindowsError;
         
         #[tokio::test]
         async fn test_windows_network_manager_creation() {
@@ -176,7 +176,7 @@ mod network_tests {
     #[cfg(target_os = "macos")]
     mod macos_tests {
         use super::*;
-        use opendlna::platform::network::MacOSNetworkManager;
+        use vuio::platform::network::MacOSNetworkManager;
         
         #[tokio::test]
         async fn test_macos_network_manager_creation() {
@@ -291,7 +291,7 @@ mod network_tests {
     #[cfg(target_os = "linux")]
     mod linux_tests {
         use super::*;
-        use opendlna::platform::network::LinuxNetworkManager;
+        use vuio::platform::network::LinuxNetworkManager;
         
         #[tokio::test]
         async fn test_linux_network_manager_creation() {
@@ -462,7 +462,7 @@ mod filesystem_tests {
     #[cfg(target_os = "windows")]
     mod windows_tests {
         use super::*;
-        use opendlna::platform::filesystem::windows::WindowsFileSystemManager;
+        use vuio::platform::filesystem::windows::WindowsFileSystemManager;
         
         #[tokio::test]
         async fn test_windows_filesystem_manager_creation() {

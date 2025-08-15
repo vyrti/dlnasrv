@@ -107,7 +107,7 @@ pub async fn demonstrate_config_hot_reload() -> Result<()> {
     info!("Updating configuration programmatically...");
     let mut updated_config = initial_config.clone();
     updated_config.server.port = 9090;
-    updated_config.server.name = "Updated OpenDLNA Server".to_string();
+    updated_config.server.name = "Updated VuIO Server".to_string();
 
     config_manager.update_config(updated_config).await?;
 

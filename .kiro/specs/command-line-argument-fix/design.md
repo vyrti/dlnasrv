@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design addresses the critical bug where OpenDLNA fails to respect command line arguments on Windows due to incorrect path validation logic. The issue stems from the Windows filesystem manager incorrectly flagging drive letter colons as invalid characters, and the configuration system not properly prioritizing command line arguments over defaults.
+This design addresses the critical bug where VuIO fails to respect command line arguments on Windows due to incorrect path validation logic. The issue stems from the Windows filesystem manager incorrectly flagging drive letter colons as invalid characters, and the configuration system not properly prioritizing command line arguments over defaults.
 
 The solution involves fixing the Windows path validation logic and ensuring proper argument precedence in the configuration loading process.
 
@@ -135,7 +135,7 @@ pub async fn from_args() -> Result<Self> {
         port: Option<u16>,
 
         /// The friendly name for the DLNA server
-        #[arg(short, long, default_value = "OpenDLNA Server")]
+        #[arg(short, long, default_value = "VuIO Server")]
         name: String,
     }
     
@@ -398,7 +398,7 @@ mod command_line_tests {
         let temp_path = temp_dir.path().to_string_lossy().to_string();
         
         // Mock command line args
-        let args = vec!["opendlna".to_string(), temp_path];
+        let args = vec!["vuio".to_string(), temp_path];
         
         // Test that valid directory is accepted
         let config = AppConfig::from_args_with_override(args).await;
@@ -412,7 +412,7 @@ mod command_line_tests {
     #[tokio::test]
     async fn test_nonexistent_command_line_directory() {
         let nonexistent_path = r"C:\this\path\should\not\exist";
-        let args = vec!["opendlna".to_string(), nonexistent_path.to_string()];
+        let args = vec!["vuio".to_string(), nonexistent_path.to_string()];
         
         // Test that nonexistent directory is rejected
         let config = AppConfig::from_args_with_override(args).await;
@@ -455,4 +455,4 @@ mod command_line_tests {
 3. Add suggestions for common path issues
 4. Test error message quality
 
-This design ensures that the OpenDLNA application will properly respect command line arguments on Windows by fixing the underlying path validation logic and ensuring proper configuration precedence.
+This design ensures that the VuIO application will properly respect command line arguments on Windows by fixing the underlying path validation logic and ensuring proper configuration precedence.

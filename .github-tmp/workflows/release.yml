@@ -38,7 +38,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.get_version.outputs.version }}
-        release_name: OpenDLNA ${{ steps.get_version.outputs.version }}
+        release_name: VuIO ${{ steps.get_version.outputs.version }}
         draft: false
         prerelease: false
         body: |
@@ -61,9 +61,9 @@ jobs:
           
           ### Downloads
           Choose the appropriate binary for your platform:
-          - **Windows**: `opendlna-windows-x86_64.zip`
-          - **macOS**: `opendlna-macos-x86_64.tar.gz` or `opendlna-macos-arm64.tar.gz`
-          - **Linux**: `opendlna-linux-x86_64.tar.gz`
+          - **Windows**: `vuio-windows-x86_64.zip`
+          - **macOS**: `vuio-macos-x86_64.tar.gz` or `vuio-macos-arm64.tar.gz`
+          - **Linux**: `vuio-linux-x86_64.tar.gz`
           
           ### Installation Packages
           - **Windows**: MSI installer available
@@ -80,37 +80,37 @@ jobs:
           # Linux builds
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary_name: opendlna
-            asset_name: opendlna-linux-x86_64.tar.gz
+            binary_name: vuio
+            asset_name: vuio-linux-x86_64.tar.gz
             build_script: ./build.sh
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            binary_name: opendlna
-            asset_name: opendlna-linux-arm64.tar.gz
+            binary_name: vuio
+            asset_name: vuio-linux-arm64.tar.gz
             build_script: ./build.sh
           
           # Windows builds
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary_name: opendlna.exe
-            asset_name: opendlna-windows-x86_64.zip
+            binary_name: vuio.exe
+            asset_name: vuio-windows-x86_64.zip
             build_script: .\build.ps1
           - os: windows-latest
             target: aarch64-pc-windows-msvc
-            binary_name: opendlna.exe
-            asset_name: opendlna-windows-arm64.zip
+            binary_name: vuio.exe
+            asset_name: vuio-windows-arm64.zip
             build_script: .\build.ps1
           
           # macOS builds
           - os: macos-latest
             target: x86_64-apple-darwin
-            binary_name: opendlna
-            asset_name: opendlna-macos-x86_64.tar.gz
+            binary_name: vuio
+            asset_name: vuio-macos-x86_64.tar.gz
             build_script: ./build.sh
           - os: macos-latest
             target: aarch64-apple-darwin
-            binary_name: opendlna
-            asset_name: opendlna-macos-arm64.tar.gz
+            binary_name: vuio
+            asset_name: vuio-macos-arm64.tar.gz
             build_script: ./build.sh
 
     steps:
@@ -202,25 +202,25 @@ jobs:
           - os: windows-latest
             package_type: msi
             target: x86_64-pc-windows-msvc
-            asset_name: opendlna-windows-x86_64.msi
+            asset_name: vuio-windows-x86_64.msi
           
           # macOS PKG package
           - os: macos-latest
             package_type: pkg
             target: x86_64-apple-darwin
-            asset_name: opendlna-macos-x86_64.pkg
+            asset_name: vuio-macos-x86_64.pkg
           
           # Linux DEB package
           - os: ubuntu-latest
             package_type: deb
             target: x86_64-unknown-linux-gnu
-            asset_name: opendlna-linux-x86_64.deb
+            asset_name: vuio-linux-x86_64.deb
           
           # Linux RPM package
           - os: ubuntu-latest
             package_type: rpm
             target: x86_64-unknown-linux-gnu
-            asset_name: opendlna-linux-x86_64.rpm
+            asset_name: vuio-linux-x86_64.rpm
 
     steps:
     - name: Checkout code
@@ -315,7 +315,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: opendlna/opendlna
+        images: vuio/vuio
         tags: |
           type=ref,event=tag
           type=semver,pattern={{version}}

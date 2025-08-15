@@ -60,10 +60,10 @@ impl PlatformConfig {
         Self {
             os_type: OsType::Windows,
             default_media_dir: Self::get_windows_default_media_dir(),
-            config_dir: app_data.join("OpenDLNA"),
-            log_dir: local_app_data.join("OpenDLNA\\Logs"),
-            cache_dir: local_app_data.join("OpenDLNA\\Cache"),
-            database_dir: local_app_data.join("OpenDLNA\\Database"),
+            config_dir: app_data.join("VuIO"),
+            log_dir: local_app_data.join("VuIO\\Logs"),
+            cache_dir: local_app_data.join("VuIO\\Cache"),
+            database_dir: local_app_data.join("VuIO\\Database"),
             preferred_ports: vec![8080, 8081, 8082, 9090, 9091, 8000, 8001],
             metadata,
         }
@@ -82,10 +82,10 @@ impl PlatformConfig {
         Self {
             os_type: OsType::MacOS,
             default_media_dir: Self::get_macos_default_media_dir(),
-            config_dir: home_dir.join("Library/Application Support/OpenDLNA"),
-            log_dir: home_dir.join("Library/Logs/OpenDLNA"),
-            cache_dir: home_dir.join("Library/Caches/OpenDLNA"),
-            database_dir: home_dir.join("Library/Application Support/OpenDLNA/Database"),
+            config_dir: home_dir.join("Library/Application Support/VuIO"),
+            log_dir: home_dir.join("Library/Logs/VuIO"),
+            cache_dir: home_dir.join("Library/Caches/VuIO"),
+            database_dir: home_dir.join("Library/Application Support/VuIO/Database"),
             preferred_ports: vec![8080, 8081, 8082, 9090, 9091, 8000, 8001],
             metadata,
         }
@@ -107,10 +107,10 @@ impl PlatformConfig {
         Self {
             os_type: OsType::Linux,
             default_media_dir: Self::get_linux_default_media_dir(),
-            config_dir: config_dir.join("opendlna"),
-            log_dir: data_dir.join("opendlna/logs"),
-            cache_dir: cache_dir.join("opendlna"),
-            database_dir: data_dir.join("opendlna/database"),
+            config_dir: config_dir.join("vuio"),
+            log_dir: data_dir.join("vuio/logs"),
+            cache_dir: cache_dir.join("vuio"),
+            database_dir: data_dir.join("vuio/database"),
             preferred_ports: vec![8080, 8081, 8082, 9090, 9091, 8000, 8001],
             metadata,
         }
@@ -270,7 +270,7 @@ impl PlatformConfig {
 
     /// Get the log file path for the current platform
     pub fn get_log_file_path(&self) -> PathBuf {
-        self.log_dir.join("opendlna.log")
+        self.log_dir.join("vuio.log")
     }
 
     /// Get the cache directory path for the current platform
@@ -485,7 +485,7 @@ mod tests {
 
         let log_file = config.get_log_file_path();
         assert!(log_file.file_name().is_some());
-        assert_eq!(log_file.file_name().unwrap(), "opendlna.log");
+        assert_eq!(log_file.file_name().unwrap(), "vuio.log");
     }
 
     #[test]

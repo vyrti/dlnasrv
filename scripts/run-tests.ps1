@@ -1,4 +1,4 @@
-# Cross-platform test runner script for OpenDLNA (PowerShell)
+# Cross-platform test runner script for VuIO (PowerShell)
 
 param(
     [Parameter(Position=0)]
@@ -280,7 +280,7 @@ function Invoke-AllTests {
     $failedTests = @()
     $platform = Get-Platform
     
-    Write-Status "Starting comprehensive test suite for OpenDLNA"
+    Write-Status "Starting comprehensive test suite for VuIO"
     Write-Status "Platform: $platform"
     Write-Status "Rust version: $(& rustc --version)"
     Write-Status "Cargo version: $(& cargo --version)"
@@ -322,7 +322,7 @@ function Invoke-AllTests {
 
 # Show help message
 function Show-Help {
-    Write-Host "OpenDLNA Test Runner (PowerShell)" -ForegroundColor $Colors.Blue
+    Write-Host "VuIO Test Runner (PowerShell)" -ForegroundColor $Colors.Blue
     Write-Host ""
     Write-Host "Usage: .\run-tests.ps1 [COMMAND] [OPTIONS]" -ForegroundColor $Colors.White
     Write-Host ""

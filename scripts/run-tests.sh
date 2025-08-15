@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-platform test runner script for OpenDLNA
+# Cross-platform test runner script for VuIO
 
 set -e
 
@@ -240,7 +240,7 @@ cleanup() {
 run_all_tests() {
     local failed_tests=()
     
-    print_status "Starting comprehensive test suite for OpenDLNA"
+    print_status "Starting comprehensive test suite for VuIO"
     print_status "Platform: $PLATFORM"
     print_status "Rust version: $(rustc --version)"
     print_status "Cargo version: $(cargo --version)"
@@ -325,7 +325,7 @@ case "${1:-all}" in
         cleanup
         ;;
     help|--help|-h)
-        echo "OpenDLNA Test Runner"
+        echo "VuIO Test Runner"
         echo
         echo "Usage: $0 [COMMAND]"
         echo

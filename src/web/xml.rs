@@ -63,8 +63,8 @@ pub fn generate_description_xml(state: &AppState) -> String {
     <device>
         <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
         <friendlyName>{}</friendlyName>
-        <manufacturer>OpenDLNA</manufacturer>
-        <modelName>OpenDLNA Server</modelName>
+        <manufacturer>VuIO</manufacturer>
+        <modelName>VuIO Server</modelName>
         <UDN>uuid:{}</UDN>
         <serviceList>
             <service>

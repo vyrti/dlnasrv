@@ -1,5 +1,5 @@
 use anyhow::Context;
-use opendlna::{
+use vuio::{
     config::AppConfig,
     database::{self, DatabaseManager, SqliteDatabase},
     logging, media,
@@ -29,7 +29,7 @@ fn parse_early_args() -> (bool, Option<String>) {
         _port: Option<u16>,
 
         /// The friendly name for the DLNA server
-        #[arg(short, long, default_value = "OpenDLNA Server")]
+        #[arg(short, long, default_value = "VuIO Server")]
         _name: String,
 
         /// Enable debug logging
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         logging::init_logging().context("Failed to initialize logging")?;
     }
 
-    info!("Starting OpenDLNA Server...");
+    info!("Starting VuIO Server...");
 
     // Detect platform information with comprehensive diagnostics
     let platform_info = match detect_platform_with_diagnostics().await {
@@ -1317,7 +1317,7 @@ async fn perform_windows_security_checks(_platform_info: &PlatformInfo) -> anyho
     if let Ok(firewall_enabled) = check_windows_firewall().await {
         if firewall_enabled {
             info!("Windows Firewall is enabled");
-            info!("You may need to allow OpenDLNA through the firewall");
+            info!("You may need to allow VuIO through the firewall");
         } else {
             info!("Windows Firewall is disabled");
         }
@@ -1854,7 +1854,7 @@ async fn flush_database_operations(database: &Arc<dyn DatabaseManager>) -> anyho
 async fn create_shutdown_backup(database: &Arc<dyn DatabaseManager>) -> anyhow::Result<()> {
     // Create backup with timestamp
     let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_name = format!("opendlna_shutdown_backup_{}.db", timestamp);
+    let backup_name = format!("vuio_shutdown_backup_{}.db", timestamp);
     
     // Use platform-appropriate backup directory
     let platform_config = crate::platform::config::PlatformConfig::for_current_platform();

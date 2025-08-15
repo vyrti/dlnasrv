@@ -1,47 +1,47 @@
-# OpenDLNA Server - Windows Setup and Troubleshooting Guide
+# VuIO Server - Windows Setup and Troubleshooting Guide
 
 ## Installation
 
 ### Option 1: MSI Installer (Recommended)
 
-1. Download the latest `opendlna-windows-x64.msi` from the releases page
+1. Download the latest `vuio-windows-x64.msi` from the releases page
 2. Right-click the MSI file and select "Run as administrator" (if prompted)
 3. Follow the installation wizard:
    - Accept the license agreement
-   - Choose installation directory (default: `C:\Program Files\OpenDLNA`)
+   - Choose installation directory (default: `C:\Program Files\VuIO`)
    - Select components to install
    - Click "Install"
 4. The installer will automatically:
-   - Create Windows Firewall rules for OpenDLNA
-   - Add OpenDLNA to the Start Menu
+   - Create Windows Firewall rules for VuIO
+   - Add VuIO to the Start Menu
    - Create a desktop shortcut (if selected)
 
 ### Option 2: Portable Installation
 
-1. Download `opendlna-windows-x64.zip` from the releases page
-2. Extract to your preferred directory (e.g., `C:\OpenDLNA`)
-3. Run `opendlna.exe` from the extracted folder
+1. Download `vuio-windows-x64.zip` from the releases page
+2. Extract to your preferred directory (e.g., `C:\VuIO`)
+3. Run `vuio.exe` from the extracted folder
 
 ## Configuration
 
 ### Configuration File Location
 
-OpenDLNA stores its configuration in the following location:
+VuIO stores its configuration in the following location:
 ```
-%APPDATA%\OpenDLNA\config.toml
+%APPDATA%\VuIO\config.toml
 ```
 
-For example: `C:\Users\YourUsername\AppData\Roaming\OpenDLNA\config.toml`
+For example: `C:\Users\YourUsername\AppData\Roaming\VuIO\config.toml`
 
 ### Default Configuration
 
-On first run, OpenDLNA creates a default configuration file:
+On first run, VuIO creates a default configuration file:
 
 ```toml
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "auto-generated-uuid"
 
 [network]
@@ -68,7 +68,7 @@ path = "C:\\Users\\%USERNAME%\\Pictures"
 recursive = true
 
 [database]
-path = "%APPDATA%\\OpenDLNA\\media.db"
+path = "%APPDATA%\\VuIO\\media.db"
 vacuum_on_startup = false
 backup_enabled = true
 ```
@@ -95,8 +95,8 @@ extensions = ["mp3", "flac", "wav"]
 ### Automatic Configuration (MSI Installer)
 
 The MSI installer automatically creates the following firewall rules:
-- **OpenDLNA HTTP Server**: Allows inbound TCP connections on port 8080
-- **OpenDLNA SSDP Discovery**: Allows inbound/outbound UDP connections on port 1900
+- **VuIO HTTP Server**: Allows inbound TCP connections on port 8080
+- **VuIO SSDP Discovery**: Allows inbound/outbound UDP connections on port 1900
 
 ### Manual Firewall Configuration
 
@@ -107,26 +107,26 @@ If you're using the portable version or need to configure manually:
    
 2. Create Inbound Rules:
    - Click "Inbound Rules" → "New Rule"
-   - Select "Program" → Browse to `opendlna.exe`
+   - Select "Program" → Browse to `vuio.exe`
    - Allow the connection
    - Apply to all profiles (Domain, Private, Public)
-   - Name: "OpenDLNA Server"
+   - Name: "VuIO Server"
 
 3. Create Outbound Rules (for SSDP):
    - Click "Outbound Rules" → "New Rule"
    - Select "Port" → UDP → Specific ports: 1900
    - Allow the connection
    - Apply to all profiles
-   - Name: "OpenDLNA SSDP"
+   - Name: "VuIO SSDP"
 
 ### Windows Firewall via Command Line
 
 Run Command Prompt as Administrator and execute:
 
 ```cmd
-netsh advfirewall firewall add rule name="OpenDLNA HTTP" dir=in action=allow protocol=TCP localport=8080
-netsh advfirewall firewall add rule name="OpenDLNA SSDP" dir=in action=allow protocol=UDP localport=1900
-netsh advfirewall firewall add rule name="OpenDLNA SSDP Out" dir=out action=allow protocol=UDP localport=1900
+netsh advfirewall firewall add rule name="VuIO HTTP" dir=in action=allow protocol=TCP localport=8080
+netsh advfirewall firewall add rule name="VuIO SSDP" dir=in action=allow protocol=UDP localport=1900
+netsh advfirewall firewall add rule name="VuIO SSDP Out" dir=out action=allow protocol=UDP localport=1900
 ```
 
 ## Troubleshooting
@@ -136,7 +136,7 @@ netsh advfirewall firewall add rule name="OpenDLNA SSDP Out" dir=out action=allo
 #### 1. "Port 1900 is already in use"
 
 **Symptoms:**
-- OpenDLNA fails to start with port binding error
+- VuIO fails to start with port binding error
 - SSDP discovery not working
 
 **Solutions:**
@@ -166,7 +166,7 @@ netsh advfirewall firewall add rule name="OpenDLNA SSDP Out" dir=out action=allo
 
 **Solutions:**
 1. **Run as Administrator:**
-   - Right-click `opendlna.exe` → "Run as administrator"
+   - Right-click `vuio.exe` → "Run as administrator"
    
 2. **Use non-privileged ports:**
    Edit `config.toml`:
@@ -231,7 +231,7 @@ netsh advfirewall firewall add rule name="OpenDLNA SSDP Out" dir=out action=allo
 
 **Solutions:**
 1. **Check file permissions:**
-   - Ensure OpenDLNA has read access to media directories
+   - Ensure VuIO has read access to media directories
    - Right-click folder → Properties → Security → Add "Everyone" with Read permissions
 
 2. **Verify file extensions:**
@@ -245,19 +245,19 @@ netsh advfirewall firewall add rule name="OpenDLNA SSDP Out" dir=out action=allo
    Ensure database directory is writable:
    ```toml
    [database]
-   path = "%APPDATA%\\OpenDLNA\\media.db"
+   path = "%APPDATA%\\VuIO\\media.db"
    ```
 
 4. **Force rescan:**
-   Delete the database file and restart OpenDLNA:
+   Delete the database file and restart VuIO:
    ```cmd
-   del "%APPDATA%\OpenDLNA\media.db"
+   del "%APPDATA%\VuIO\media.db"
    ```
 
 #### 5. High CPU Usage During Scanning
 
 **Symptoms:**
-- OpenDLNA uses excessive CPU during startup
+- VuIO uses excessive CPU during startup
 - System becomes unresponsive
 
 **Solutions:**
@@ -303,14 +303,14 @@ ping -t 239.255.255.250
    Set environment variable:
    ```cmd
    set RUST_LOG=debug
-   opendlna.exe
+   vuio.exe
    ```
 
 2. **Monitor SSDP traffic:**
    Use Wireshark or built-in tools:
    ```cmd
    netsh trace start capture=yes provider=Microsoft-Windows-TCPIP
-   # Run OpenDLNA, then stop trace
+   # Run VuIO, then stop trace
    netsh trace stop
    ```
 
@@ -343,7 +343,7 @@ For network drives and UNC paths:
 2. **Move database to SSD:**
    ```toml
    [database]
-   path = "C:\\OpenDLNA\\media.db"
+   path = "C:\\VuIO\\media.db"
    ```
 
 #### Network Optimization
@@ -369,16 +369,16 @@ For network drives and UNC paths:
 
 2. **Create service:**
    ```cmd
-   nssm install OpenDLNA "C:\Program Files\OpenDLNA\opendlna.exe"
-   nssm set OpenDLNA AppDirectory "C:\Program Files\OpenDLNA"
-   nssm set OpenDLNA DisplayName "OpenDLNA Media Server"
-   nssm set OpenDLNA Description "Cross-platform DLNA media server"
-   nssm set OpenDLNA Start SERVICE_AUTO_START
+   nssm install VuIO "C:\Program Files\VuIO\vuio.exe"
+   nssm set VuIO AppDirectory "C:\Program Files\VuIO"
+   nssm set VuIO DisplayName "VuIO Media Server"
+   nssm set VuIO Description "Cross-platform DLNA media server"
+   nssm set VuIO Start SERVICE_AUTO_START
    ```
 
 3. **Start service:**
    ```cmd
-   net start OpenDLNA
+   net start VuIO
    ```
 
 ### Registry Configuration
@@ -388,9 +388,9 @@ For system-wide configuration, create registry entries:
 ```reg
 Windows Registry Editor Version 5.00
 
-[HKEY_LOCAL_MACHINE\SOFTWARE\OpenDLNA]
-"ConfigPath"="C:\\ProgramData\\OpenDLNA\\config.toml"
-"DatabasePath"="C:\\ProgramData\\OpenDLNA\\media.db"
+[HKEY_LOCAL_MACHINE\SOFTWARE\VuIO]
+"ConfigPath"="C:\\ProgramData\\VuIO\\config.toml"
+"DatabasePath"="C:\\ProgramData\\VuIO\\media.db"
 "LogLevel"="info"
 ```
 
@@ -407,15 +407,15 @@ For enterprise deployments, configure via Group Policy:
 
 ### Log File Locations
 
-- **Application logs:** `%APPDATA%\OpenDLNA\logs\opendlna.log`
-- **Error logs:** `%APPDATA%\OpenDLNA\logs\error.log`
-- **Debug logs:** `%APPDATA%\OpenDLNA\logs\debug.log`
+- **Application logs:** `%APPDATA%\VuIO\logs\vuio.log`
+- **Error logs:** `%APPDATA%\VuIO\logs\error.log`
+- **Debug logs:** `%APPDATA%\VuIO\logs\debug.log`
 
 ### Enable Debug Logging
 
 ```cmd
-set RUST_LOG=opendlna=debug
-opendlna.exe
+set RUST_LOG=vuio=debug
+vuio.exe
 ```
 
 ### System Information Collection
@@ -435,19 +435,19 @@ netsh advfirewall firewall show rule name=all > firewall_rules.txt
 # Running services
 sc query type= service state= all > services.txt
 
-# OpenDLNA logs
-copy "%APPDATA%\OpenDLNA\logs\*" support_logs\
+# VuIO logs
+copy "%APPDATA%\VuIO\logs\*" support_logs\
 ```
 
 ## Getting Help
 
 If you continue to experience issues:
 
-1. **Check the logs** in `%APPDATA%\OpenDLNA\logs\`
+1. **Check the logs** in `%APPDATA%\VuIO\logs\`
 2. **Search existing issues** on GitHub
 3. **Create a new issue** with:
    - Windows version (`winver`)
-   - OpenDLNA version
+   - VuIO version
    - Configuration file (remove sensitive paths)
    - Relevant log entries
    - Network configuration (`ipconfig /all`)
@@ -456,23 +456,23 @@ If you continue to experience issues:
 
 ### Windows Defender
 
-OpenDLNA may be flagged by Windows Defender. To whitelist:
+VuIO may be flagged by Windows Defender. To whitelist:
 
 1. Open Windows Security
 2. Go to Virus & threat protection
 3. Click "Manage settings" under Virus & threat protection settings
 4. Click "Add or remove exclusions"
-5. Add folder exclusion for OpenDLNA installation directory
+5. Add folder exclusion for VuIO installation directory
 
 ### Network Security
 
 1. **Use private networks only** - avoid running on public WiFi
 2. **Configure firewall rules** to limit access to trusted networks
-3. **Regular updates** - keep OpenDLNA updated for security patches
+3. **Regular updates** - keep VuIO updated for security patches
 4. **Monitor access logs** for unauthorized access attempts
 
 ### File System Security
 
 1. **Limit media directory permissions** - only grant read access
 2. **Avoid system directories** - don't monitor Windows system folders
-3. **Use dedicated media user** - create a limited user account for OpenDLNA service
+3. **Use dedicated media user** - create a limited user account for VuIO service

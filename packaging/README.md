@@ -1,6 +1,6 @@
-# OpenDLNA Packaging
+# VuIO Packaging
 
-This directory contains scripts and configurations for building platform-specific packages for OpenDLNA Server.
+This directory contains scripts and configurations for building platform-specific packages for VuIO Server.
 
 ## Supported Package Formats
 
@@ -130,7 +130,7 @@ packaging/
 ├── build-packages.sh         # Master build script
 ├── windows/
 │   ├── build-msi.ps1        # MSI builder script
-│   └── opendlna.wxs         # WiX installer definition
+│   └── vuio.wxs         # WiX installer definition
 ├── macos/
 │   └── build-pkg.sh         # PKG builder script
 └── linux/
@@ -151,33 +151,33 @@ packaging/
 - **LaunchDaemon**: System service integration
 - **User Management**: Creates dedicated service user
 - **Permissions**: Proper macOS permission handling
-- **Configuration**: Default configuration in `/usr/local/etc/opendlna/`
-- **Logs**: Centralized logging in `/usr/local/var/log/opendlna/`
+- **Configuration**: Default configuration in `/usr/local/etc/vuio/`
+- **Logs**: Centralized logging in `/usr/local/var/log/vuio/`
 
 ### Linux DEB/RPM Features
 - **Systemd Integration**: Native systemd service
-- **User Management**: Creates `opendlna` system user
+- **User Management**: Creates `vuio` system user
 - **Security**: Hardened systemd service configuration
-- **Configuration**: System configuration in `/etc/opendlna/`
-- **Logs**: Journal integration with fallback to `/var/log/opendlna/`
+- **Configuration**: System configuration in `/etc/vuio/`
+- **Logs**: Journal integration with fallback to `/var/log/vuio/`
 
 ## Configuration Files
 
 All packages include default configuration files with platform-appropriate defaults:
 
 ### Windows Default Paths
-- **Config**: `%PROGRAMFILES%\OpenDLNA\config\opendlna.toml`
-- **Logs**: `%PROGRAMFILES%\OpenDLNA\logs\`
+- **Config**: `%PROGRAMFILES%\VuIO\config\vuio.toml`
+- **Logs**: `%PROGRAMFILES%\VuIO\logs\`
 - **Media**: `%PUBLIC%\Videos`, `%PUBLIC%\Music`, `%PUBLIC%\Pictures`
 
 ### macOS Default Paths
-- **Config**: `/usr/local/etc/opendlna/opendlna.toml`
-- **Logs**: `/usr/local/var/log/opendlna/`
+- **Config**: `/usr/local/etc/vuio/vuio.toml`
+- **Logs**: `/usr/local/var/log/vuio/`
 - **Media**: `/Users/Shared/Movies`, `/Users/Shared/Music`, `/Users/Shared/Pictures`
 
 ### Linux Default Paths
-- **Config**: `/etc/opendlna/opendlna.toml`
-- **Logs**: `/var/log/opendlna/` or `journalctl -u opendlna`
+- **Config**: `/etc/vuio/vuio.toml`
+- **Logs**: `/var/log/vuio/` or `journalctl -u vuio`
 - **Media**: `/home/media/Videos`, `/home/media/Music`, `/home/media/Pictures`
 
 ## Service Management
@@ -185,43 +185,43 @@ All packages include default configuration files with platform-appropriate defau
 ### Windows
 ```cmd
 # Start service
-net start OpenDLNA
+net start VuIO
 
 # Stop service
-net stop OpenDLNA
+net stop VuIO
 
 # Service status
-sc query OpenDLNA
+sc query VuIO
 ```
 
 ### macOS
 ```bash
 # Start service
-sudo launchctl start com.opendlna.server
+sudo launchctl start com.vuio.server
 
 # Stop service
-sudo launchctl stop com.opendlna.server
+sudo launchctl stop com.vuio.server
 
 # Service status
-sudo launchctl list | grep opendlna
+sudo launchctl list | grep vuio
 ```
 
 ### Linux
 ```bash
 # Start service
-sudo systemctl start opendlna
+sudo systemctl start vuio
 
 # Stop service
-sudo systemctl stop opendlna
+sudo systemctl stop vuio
 
 # Enable auto-start
-sudo systemctl enable opendlna
+sudo systemctl enable vuio
 
 # Service status
-sudo systemctl status opendlna
+sudo systemctl status vuio
 
 # View logs
-journalctl -u opendlna -f
+journalctl -u vuio -f
 ```
 
 ## Troubleshooting
@@ -246,8 +246,8 @@ journalctl -u opendlna -f
 ### Modifying Default Configuration
 Edit the configuration templates in each platform's build script:
 - Windows: `build-msi.ps1` (search for "defaultConfig")
-- macOS: `build-pkg.sh` (search for "opendlna.toml")
-- Linux: `build-deb.sh` and `build-rpm.sh` (search for "opendlna.toml")
+- macOS: `build-pkg.sh` (search for "vuio.toml")
+- Linux: `build-deb.sh` and `build-rpm.sh` (search for "vuio.toml")
 
 ### Adding Custom Files
 Modify the package structure in each build script to include additional files:
@@ -258,7 +258,7 @@ Modify the package structure in each build script to include additional files:
 
 ### Changing Installation Paths
 Update the installation paths in:
-- Windows: `opendlna.wxs` (Directory elements)
+- Windows: `vuio.wxs` (Directory elements)
 - macOS: `build-pkg.sh` (INSTALL_LOCATION variable)
 - Linux: `build-deb.sh` and `build-rpm.sh` (directory creation sections)
 

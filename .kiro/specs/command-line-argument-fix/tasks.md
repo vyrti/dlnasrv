@@ -69,7 +69,7 @@
   - _Requirements: Network interface detection should be comprehensive_
 
 - [ ] 11. Test the complete fix with the original failing command
-  - Run `.\target\release\opendlna.exe "C:\Users\Welcome\Downloads\Video"` 
+  - Run `.\target\release\vuio.exe "C:\Users\Welcome\Downloads\Video"` 
   - Verify that the application uses the provided directory instead of defaulting
   - Verify that no path validation errors occur for valid Windows paths
   - Verify that proper error messages appear for invalid paths

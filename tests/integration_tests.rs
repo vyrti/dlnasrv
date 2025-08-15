@@ -3,19 +3,19 @@
 //! These tests verify that different components work together correctly
 //! across Windows, macOS, and Linux platforms.
 
-use opendlna::platform::{PlatformInfo, OsType};
-use opendlna::platform::network::{NetworkManager, SsdpConfig};
-use opendlna::platform::filesystem::{FileSystemManager, create_platform_filesystem_manager};
-use opendlna::database::{DatabaseManager, SqliteDatabase, MediaFile};
-use opendlna::watcher::{FileSystemWatcher, CrossPlatformWatcher, FileSystemEvent};
+use vuio::platform::{PlatformInfo, OsType};
+use vuio::platform::network::{NetworkManager, SsdpConfig};
+use vuio::platform::filesystem::{FileSystemManager, create_platform_filesystem_manager};
+use vuio::database::{DatabaseManager, SqliteDatabase, MediaFile};
+use vuio::watcher::{FileSystemWatcher, CrossPlatformWatcher, FileSystemEvent};
 
 // Platform-specific network managers
 #[cfg(target_os = "windows")]
-use opendlna::platform::network::WindowsNetworkManager;
+use vuio::platform::network::WindowsNetworkManager;
 #[cfg(target_os = "macos")]
-use opendlna::platform::network::MacOSNetworkManager;
+use vuio::platform::network::MacOSNetworkManager;
 #[cfg(target_os = "linux")]
-use opendlna::platform::network::LinuxNetworkManager;
+use vuio::platform::network::LinuxNetworkManager;
 
 // Create a type alias for the current platform's network manager
 #[cfg(target_os = "windows")]
@@ -127,7 +127,7 @@ mod dlna_discovery_tests {
                                    NT: upnp:rootdevice\r\n\
                                    NTS: ssdp:alive\r\n\
                                    USN: uuid:test-device::upnp:rootdevice\r\n\
-                                   SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\r\n";
+                                   SERVER: VuIO/1.0 UPnP/1.0\r\n\r\n";
                 
                 // Try to send announcement
                 let multicast_group = format!("{}:{}", config.multicast_address, socket.port)
@@ -811,7 +811,7 @@ mod integration_tests {
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "test-uuid-windows"
 
 [network]
@@ -842,7 +842,7 @@ backup_enabled = true
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "test-uuid-unix"
 
 [network]

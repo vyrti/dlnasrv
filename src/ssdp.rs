@@ -317,7 +317,7 @@ async fn send_ssdp_alive(state: &AppState, network_manager: &PlatformNetworkMana
             LOCATION: http://{}:{}/description.xml\r\n\
             NT: {}\r\n\
             NTS: ssdp:alive\r\n\
-            SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
+            SERVER: VuIO/1.0 UPnP/1.0\r\n\
             USN: {}\r\n\r\n",
             SSDP_MULTICAST_ADDR, SSDP_PORT,
             server_ip, config.server.port, nt, usn
@@ -404,7 +404,7 @@ async fn create_ssdp_response(state: &AppState, _ssdp_port: u16, service_type: &
         CACHE-CONTROL: max-age=1800\r\n\
         EXT:\r\n\
         LOCATION: http://{}:{}/description.xml\r\n\
-        SERVER: OpenDLNA/1.0 UPnP/1.0\r\n\
+        SERVER: VuIO/1.0 UPnP/1.0\r\n\
         ST: {}\r\n\
         USN: {}\r\n\
         \r\n",

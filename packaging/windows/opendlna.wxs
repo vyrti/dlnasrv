@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*" 
-           Name="OpenDLNA Server" 
+           Name="VuIO Server" 
            Language="1033" 
-           Version="!(bind.FileVersion.OpenDLNAExe)" 
-           Manufacturer="OpenDLNA Project" 
+           Version="!(bind.FileVersion.VuIOExe)" 
+           Manufacturer="VuIO Project" 
            UpgradeCode="12345678-1234-1234-1234-123456789012">
     
     <Package InstallerVersion="200" 
              Compressed="yes" 
              InstallScope="perMachine" 
-             Description="OpenDLNA Media Server"
+             Description="VuIO Media Server"
              Comments="Cross-platform DLNA media server" />
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Features -->
-    <Feature Id="ProductFeature" Title="OpenDLNA Server" Level="1">
+    <Feature Id="ProductFeature" Title="VuIO Server" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
       <ComponentRef Id="ApplicationShortcut" />
       <ComponentRef Id="ConfigFile" />
@@ -27,14 +27,14 @@
     <!-- Directory Structure -->
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFilesFolder">
-        <Directory Id="INSTALLFOLDER" Name="OpenDLNA">
+        <Directory Id="INSTALLFOLDER" Name="VuIO">
           <Directory Id="ConfigFolder" Name="config" />
           <Directory Id="LogsFolder" Name="logs" />
         </Directory>
       </Directory>
       
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="OpenDLNA Server" />
+        <Directory Id="ApplicationProgramsFolder" Name="VuIO Server" />
       </Directory>
       
       <Directory Id="DesktopFolder" Name="Desktop" />
@@ -43,18 +43,18 @@
     <!-- Components -->
     <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
       <!-- Main executable -->
-      <Component Id="OpenDLNAExe" Guid="*">
-        <File Id="OpenDLNAExe" 
-              Source="$(var.SourceDir)\opendlna.exe" 
+      <Component Id="VuIOExe" Guid="*">
+        <File Id="VuIOExe" 
+              Source="$(var.SourceDir)\vuio.exe" 
               KeyPath="yes" 
               Checksum="yes" />
         
         <!-- Windows Service registration -->
-        <ServiceInstall Id="OpenDLNAService"
+        <ServiceInstall Id="VuIOService"
                         Type="ownProcess"
                         Vital="yes"
-                        Name="OpenDLNA"
-                        DisplayName="OpenDLNA Media Server"
+                        Name="VuIO"
+                        DisplayName="VuIO Media Server"
                         Description="DLNA media server for sharing media files"
                         Start="auto"
                         Account="LocalSystem"
@@ -67,7 +67,7 @@
                         Start="install" 
                         Stop="both" 
                         Remove="uninstall" 
-                        Name="OpenDLNA" 
+                        Name="VuIO" 
                         Wait="yes" />
       </Component>
     </ComponentGroup>
@@ -77,20 +77,20 @@
       <File Id="DefaultConfig" 
             Source="$(var.SourceDir)\config\default.toml" 
             KeyPath="yes" 
-            Name="opendlna.toml" />
+            Name="vuio.toml" />
     </Component>
 
     <!-- Application shortcuts -->
     <Component Id="ApplicationShortcut" Directory="ApplicationProgramsFolder" Guid="*">
       <Shortcut Id="ApplicationStartMenuShortcut"
-                Name="OpenDLNA Server"
-                Description="Start OpenDLNA Media Server"
-                Target="[#OpenDLNAExe]"
+                Name="VuIO Server"
+                Description="Start VuIO Media Server"
+                Target="[#VuIOExe]"
                 WorkingDirectory="INSTALLFOLDER" />
       
       <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
       <RegistryValue Root="HKCU" 
-                     Key="Software\OpenDLNA\Server" 
+                     Key="Software\VuIO\Server" 
                      Name="installed" 
                      Type="integer" 
                      Value="1" 
@@ -99,16 +99,16 @@
 
     <!-- Windows Firewall rules -->
     <Component Id="FirewallRules" Directory="INSTALLFOLDER" Guid="*">
-      <fire:FirewallException Id="OpenDLNAHTTP"
-                              Name="OpenDLNA HTTP Server"
+      <fire:FirewallException Id="VuIOHTTP"
+                              Name="VuIO HTTP Server"
                               Port="8080"
                               Protocol="tcp"
                               Scope="localSubnet"
                               IgnoreFailure="yes"
                               xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension" />
       
-      <fire:FirewallException Id="OpenDLNASSDP"
-                              Name="OpenDLNA SSDP Discovery"
+      <fire:FirewallException Id="VuIOSSDP"
+                              Name="VuIO SSDP Discovery"
                               Port="1900"
                               Protocol="udp"
                               Scope="localSubnet"
@@ -116,7 +116,7 @@
                               xmlns:fire="http://schemas.microsoft.com/wix/FirewallExtension" />
       
       <RegistryValue Root="HKLM" 
-                     Key="Software\OpenDLNA\Server" 
+                     Key="Software\VuIO\Server" 
                      Name="firewall_configured" 
                      Type="integer" 
                      Value="1" 
@@ -135,9 +135,9 @@
     
     <!-- Custom properties -->
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
-    <Property Id="ARPPRODUCTICON" Value="OpenDLNAExe" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/opendlna/opendlna" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/opendlna/opendlna" />
+    <Property Id="ARPPRODUCTICON" Value="VuIOExe" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/vuio/vuio" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/vuio/vuio" />
     <Property Id="ARPNOREPAIR" Value="1" />
     <Property Id="ARPNOMODIFY" Value="1" />
   </Product>

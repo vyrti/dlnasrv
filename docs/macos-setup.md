@@ -1,4 +1,4 @@
-# OpenDLNA Server - macOS Setup and Configuration Guide
+# VuIO Server - macOS Setup and Configuration Guide
 
 ## Installation
 
@@ -9,58 +9,58 @@
    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    ```
 
-2. **Add OpenDLNA tap and install**:
+2. **Add VuIO tap and install**:
    ```bash
-   brew tap opendlna/tap
-   brew install opendlna
+   brew tap vuio/tap
+   brew install vuio
    ```
 
 3. **Start the service**:
    ```bash
-   brew services start opendlna
+   brew services start vuio
    ```
 
 ### Option 2: PKG Installer
 
-1. Download the latest `opendlna-macos-universal.pkg` from the releases page
+1. Download the latest `vuio-macos-universal.pkg` from the releases page
 2. Double-click the PKG file to start the installer
 3. Follow the installation wizard:
    - Enter administrator password when prompted
-   - Choose installation location (default: `/Applications/OpenDLNA`)
+   - Choose installation location (default: `/Applications/VuIO`)
    - Complete the installation
 4. The installer will:
-   - Install OpenDLNA to `/Applications/OpenDLNA/`
+   - Install VuIO to `/Applications/VuIO/`
    - Create a launch daemon for automatic startup
    - Set up proper permissions and security attributes
 
 ### Option 3: Manual Installation
 
-1. Download `opendlna-macos-universal.tar.gz` from the releases page
+1. Download `vuio-macos-universal.tar.gz` from the releases page
 2. Extract to your preferred location:
    ```bash
-   tar -xzf opendlna-macos-universal.tar.gz
-   sudo mv opendlna /usr/local/bin/
-   sudo chmod +x /usr/local/bin/opendlna
+   tar -xzf vuio-macos-universal.tar.gz
+   sudo mv vuio /usr/local/bin/
+   sudo chmod +x /usr/local/bin/vuio
    ```
 
 ## Configuration
 
 ### Configuration File Location
 
-OpenDLNA stores its configuration in the following location:
+VuIO stores its configuration in the following location:
 ```
-~/Library/Application Support/OpenDLNA/config.toml
+~/Library/Application Support/VuIO/config.toml
 ```
 
 ### Default Configuration
 
-On first run, OpenDLNA creates a default configuration file:
+On first run, VuIO creates a default configuration file:
 
 ```toml
 [server]
 port = 8080
 interface = "0.0.0.0"
-name = "OpenDLNA Server"
+name = "VuIO Server"
 uuid = "auto-generated-uuid"
 
 [network]
@@ -87,7 +87,7 @@ path = "~/Pictures"
 recursive = true
 
 [database]
-path = "~/Library/Application Support/OpenDLNA/media.db"
+path = "~/Library/Application Support/VuIO/media.db"
 vacuum_on_startup = false
 backup_enabled = true
 ```
@@ -113,24 +113,24 @@ extensions = ["mp4", "mp3"]
 
 ### Privacy Permissions
 
-OpenDLNA requires several permissions on macOS:
+VuIO requires several permissions on macOS:
 
 #### Full Disk Access (macOS 10.14+)
 
 1. Open **System Preferences** → **Security & Privacy** → **Privacy**
 2. Click the lock icon and enter your password
 3. Select **Full Disk Access** from the left sidebar
-4. Click the **+** button and add OpenDLNA:
-   - If installed via Homebrew: `/usr/local/bin/opendlna`
-   - If installed via PKG: `/Applications/OpenDLNA/opendlna`
-   - If running from custom location: navigate to your OpenDLNA binary
+4. Click the **+** button and add VuIO:
+   - If installed via Homebrew: `/usr/local/bin/vuio`
+   - If installed via PKG: `/Applications/VuIO/vuio`
+   - If running from custom location: navigate to your VuIO binary
 
 #### Network Access
 
-1. When first starting OpenDLNA, macOS will prompt for network access
+1. When first starting VuIO, macOS will prompt for network access
 2. Click **Allow** to permit incoming network connections
 3. If you missed the prompt, go to **System Preferences** → **Security & Privacy** → **Firewall** → **Firewall Options**
-4. Ensure OpenDLNA is listed and set to **Allow incoming connections**
+4. Ensure VuIO is listed and set to **Allow incoming connections**
 
 #### File System Access
 
@@ -138,7 +138,7 @@ For accessing external drives and network volumes:
 
 1. **System Preferences** → **Security & Privacy** → **Privacy**
 2. Select **Files and Folders** from the left sidebar
-3. Ensure OpenDLNA has access to:
+3. Ensure VuIO has access to:
    - Downloads Folder
    - Documents Folder
    - Desktop Folder
@@ -147,38 +147,38 @@ For accessing external drives and network volumes:
 
 ### Gatekeeper and Code Signing
 
-If you encounter "OpenDLNA cannot be opened because it is from an unidentified developer":
+If you encounter "VuIO cannot be opened because it is from an unidentified developer":
 
 #### Option 1: Allow in Security Preferences
-1. Try to run OpenDLNA
+1. Try to run VuIO
 2. Go to **System Preferences** → **Security & Privacy** → **General**
-3. Click **Allow Anyway** next to the OpenDLNA message
+3. Click **Allow Anyway** next to the VuIO message
 
 #### Option 2: Override Gatekeeper (Advanced)
 ```bash
-sudo xattr -rd com.apple.quarantine /path/to/opendlna
+sudo xattr -rd com.apple.quarantine /path/to/vuio
 ```
 
 #### Option 3: Disable Gatekeeper Temporarily (Not Recommended)
 ```bash
 sudo spctl --master-disable
-# Run OpenDLNA, then re-enable:
+# Run VuIO, then re-enable:
 sudo spctl --master-enable
 ```
 
-## Running OpenDLNA
+## Running VuIO
 
 ### Manual Execution
 
 ```bash
 # Run in foreground
-opendlna
+vuio
 
 # Run in background
-nohup opendlna > ~/Library/Logs/opendlna.log 2>&1 &
+nohup vuio > ~/Library/Logs/vuio.log 2>&1 &
 
 # Run with debug logging
-RUST_LOG=debug opendlna
+RUST_LOG=debug vuio
 ```
 
 ### Launch Daemon (Automatic Startup)
@@ -187,7 +187,7 @@ Create a launch daemon for automatic startup:
 
 1. **Create launch daemon plist**:
    ```bash
-   sudo nano /Library/LaunchDaemons/com.opendlna.server.plist
+   sudo nano /Library/LaunchDaemons/com.vuio.server.plist
    ```
 
 2. **Add the following content**:
@@ -197,32 +197,32 @@ Create a launch daemon for automatic startup:
    <plist version="1.0">
    <dict>
        <key>Label</key>
-       <string>com.opendlna.server</string>
+       <string>com.vuio.server</string>
        <key>ProgramArguments</key>
        <array>
-           <string>/usr/local/bin/opendlna</string>
+           <string>/usr/local/bin/vuio</string>
        </array>
        <key>RunAtLoad</key>
        <true/>
        <key>KeepAlive</key>
        <true/>
        <key>StandardOutPath</key>
-       <string>/var/log/opendlna.log</string>
+       <string>/var/log/vuio.log</string>
        <key>StandardErrorPath</key>
-       <string>/var/log/opendlna.error.log</string>
+       <string>/var/log/vuio.error.log</string>
        <key>WorkingDirectory</key>
        <string>/usr/local/bin</string>
        <key>UserName</key>
-       <string>_opendlna</string>
+       <string>_vuio</string>
    </dict>
    </plist>
    ```
 
 3. **Set permissions and load**:
    ```bash
-   sudo chown root:wheel /Library/LaunchDaemons/com.opendlna.server.plist
-   sudo chmod 644 /Library/LaunchDaemons/com.opendlna.server.plist
-   sudo launchctl load /Library/LaunchDaemons/com.opendlna.server.plist
+   sudo chown root:wheel /Library/LaunchDaemons/com.vuio.server.plist
+   sudo chmod 644 /Library/LaunchDaemons/com.vuio.server.plist
+   sudo launchctl load /Library/LaunchDaemons/com.vuio.server.plist
    ```
 
 ### User Launch Agent (User-specific)
@@ -232,7 +232,7 @@ For user-specific startup (recommended for desktop use):
 1. **Create user launch agent**:
    ```bash
    mkdir -p ~/Library/LaunchAgents
-   nano ~/Library/LaunchAgents/com.opendlna.server.plist
+   nano ~/Library/LaunchAgents/com.vuio.server.plist
    ```
 
 2. **Add the following content**:
@@ -242,26 +242,26 @@ For user-specific startup (recommended for desktop use):
    <plist version="1.0">
    <dict>
        <key>Label</key>
-       <string>com.opendlna.server</string>
+       <string>com.vuio.server</string>
        <key>ProgramArguments</key>
        <array>
-           <string>/usr/local/bin/opendlna</string>
+           <string>/usr/local/bin/vuio</string>
        </array>
        <key>RunAtLoad</key>
        <true/>
        <key>KeepAlive</key>
        <true/>
        <key>StandardOutPath</key>
-       <string>/Users/$(whoami)/Library/Logs/opendlna.log</string>
+       <string>/Users/$(whoami)/Library/Logs/vuio.log</string>
        <key>StandardErrorPath</key>
-       <string>/Users/$(whoami)/Library/Logs/opendlna.error.log</string>
+       <string>/Users/$(whoami)/Library/Logs/vuio.error.log</string>
    </dict>
    </plist>
    ```
 
 3. **Load the launch agent**:
    ```bash
-   launchctl load ~/Library/LaunchAgents/com.opendlna.server.plist
+   launchctl load ~/Library/LaunchAgents/com.vuio.server.plist
    ```
 
 ## Troubleshooting
@@ -279,12 +279,12 @@ For user-specific startup (recommended for desktop use):
 1. **Grant Full Disk Access** (see Permissions section above)
 2. **Check file permissions**:
    ```bash
-   ls -la ~/Library/Application\ Support/OpenDLNA/
-   chmod 755 ~/Library/Application\ Support/OpenDLNA/
+   ls -la ~/Library/Application\ Support/VuIO/
+   chmod 755 ~/Library/Application\ Support/VuIO/
    ```
 3. **Run with proper user permissions**:
    ```bash
-   sudo chown -R $(whoami):staff ~/Library/Application\ Support/OpenDLNA/
+   sudo chown -R $(whoami):staff ~/Library/Application\ Support/VuIO/
    ```
 
 #### 2. Network Discovery Issues
@@ -309,7 +309,7 @@ netstat -an | grep 1900
 **Solutions:**
 1. **Check macOS Firewall**:
    - System Preferences → Security & Privacy → Firewall
-   - Ensure firewall is either disabled or OpenDLNA is allowed
+   - Ensure firewall is either disabled or VuIO is allowed
 
 2. **Verify network interface selection**:
    ```toml
@@ -377,7 +377,7 @@ If running x86_64 binary on Apple Silicon:
 
 2. **Verify architecture**:
    ```bash
-   file /usr/local/bin/opendlna
+   file /usr/local/bin/vuio
    # Should show: Mach-O 64-bit executable arm64 (for native)
    # Or: Mach-O 64-bit executable x86_64 (for Intel/Rosetta)
    ```
@@ -406,9 +406,9 @@ ping -c 3 239.255.255.250
 # Check firewall status
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
 
-# Add OpenDLNA to firewall exceptions
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/opendlna
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/opendlna
+# Add VuIO to firewall exceptions
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/local/bin/vuio
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/local/bin/vuio
 ```
 
 #### Port Binding Issues
@@ -444,9 +444,9 @@ hdiutil attach ~/MediaDrive.dmg
 #### File Permissions
 
 ```bash
-# Fix permissions for OpenDLNA directories
-sudo chown -R $(whoami):staff ~/Library/Application\ Support/OpenDLNA/
-chmod -R 755 ~/Library/Application\ Support/OpenDLNA/
+# Fix permissions for VuIO directories
+sudo chown -R $(whoami):staff ~/Library/Application\ Support/VuIO/
+chmod -R 755 ~/Library/Application\ Support/VuIO/
 
 # For media directories
 chmod -R 755 ~/Movies ~/Music ~/Pictures
@@ -485,7 +485,7 @@ interface_selection = "Auto"  # Automatic selection
 
 ```toml
 [database]
-path = "~/Library/Application Support/OpenDLNA/media.db"
+path = "~/Library/Application Support/VuIO/media.db"
 vacuum_on_startup = true
 backup_enabled = true
 ```
@@ -516,57 +516,57 @@ exclude_patterns = [
 #### Create Dedicated User
 
 ```bash
-# Create dedicated user for OpenDLNA
-sudo dscl . -create /Users/_opendlna
-sudo dscl . -create /Users/_opendlna UserShell /usr/bin/false
-sudo dscl . -create /Users/_opendlna RealName "OpenDLNA Server"
-sudo dscl . -create /Users/_opendlna UniqueID 501
-sudo dscl . -create /Users/_opendlna PrimaryGroupID 20
-sudo dscl . -create /Users/_opendlna NFSHomeDirectory /var/empty
+# Create dedicated user for VuIO
+sudo dscl . -create /Users/_vuio
+sudo dscl . -create /Users/_vuio UserShell /usr/bin/false
+sudo dscl . -create /Users/_vuio RealName "VuIO Server"
+sudo dscl . -create /Users/_vuio UniqueID 501
+sudo dscl . -create /Users/_vuio PrimaryGroupID 20
+sudo dscl . -create /Users/_vuio NFSHomeDirectory /var/empty
 ```
 
 #### Sandboxing
 
-For enhanced security, run OpenDLNA in a sandbox:
+For enhanced security, run VuIO in a sandbox:
 
 ```bash
 # Create sandbox profile
-cat > ~/opendlna.sb << 'EOF'
+cat > ~/vuio.sb << 'EOF'
 (version 1)
 (deny default)
-(allow process-exec (literal "/usr/local/bin/opendlna"))
+(allow process-exec (literal "/usr/local/bin/vuio"))
 (allow file-read* (subpath "/Users/$(whoami)/Movies"))
 (allow file-read* (subpath "/Users/$(whoami)/Music"))
 (allow file-read* (subpath "/Users/$(whoami)/Pictures"))
-(allow file-write* (subpath "/Users/$(whoami)/Library/Application Support/OpenDLNA"))
+(allow file-write* (subpath "/Users/$(whoami)/Library/Application Support/VuIO"))
 (allow network-inbound (local tcp "*:8080"))
 (allow network-outbound (remote udp "*:1900"))
 EOF
 
 # Run with sandbox
-sandbox-exec -f ~/opendlna.sb opendlna
+sandbox-exec -f ~/vuio.sb vuio
 ```
 
 ## Logging and Diagnostics
 
 ### Log File Locations
 
-- **Application logs:** `~/Library/Logs/opendlna.log`
-- **System logs:** `/var/log/opendlna.log` (if running as daemon)
-- **Launch daemon logs:** Check with `sudo launchctl list | grep opendlna`
+- **Application logs:** `~/Library/Logs/vuio.log`
+- **System logs:** `/var/log/vuio.log` (if running as daemon)
+- **Launch daemon logs:** Check with `sudo launchctl list | grep vuio`
 
 ### Enable Debug Logging
 
 ```bash
 # Set environment variable
-export RUST_LOG=opendlna=debug
-opendlna
+export RUST_LOG=vuio=debug
+vuio
 
 # Or for launch daemon, edit the plist:
 <key>EnvironmentVariables</key>
 <dict>
     <key>RUST_LOG</key>
-    <string>opendlna=debug</string>
+    <string>vuio=debug</string>
 </dict>
 ```
 
@@ -579,15 +579,15 @@ For support requests:
 system_profiler SPSoftwareDataType > system_info.txt
 system_profiler SPNetworkDataType > network_info.txt
 
-# OpenDLNA configuration
-cp ~/Library/Application\ Support/OpenDLNA/config.toml config_backup.toml
+# VuIO configuration
+cp ~/Library/Application\ Support/VuIO/config.toml config_backup.toml
 
 # Network configuration
 ifconfig > network_config.txt
 netstat -rn > routing_table.txt
 
 # Permissions check
-ls -la ~/Library/Application\ Support/OpenDLNA/ > permissions.txt
+ls -la ~/Library/Application\ Support/VuIO/ > permissions.txt
 ```
 
 ## Uninstallation
@@ -595,54 +595,54 @@ ls -la ~/Library/Application\ Support/OpenDLNA/ > permissions.txt
 ### Homebrew Installation
 
 ```bash
-brew services stop opendlna
-brew uninstall opendlna
-brew untap opendlna/tap
+brew services stop vuio
+brew uninstall vuio
+brew untap vuio/tap
 ```
 
 ### PKG Installation
 
 ```bash
 # Stop and remove launch daemon
-sudo launchctl unload /Library/LaunchDaemons/com.opendlna.server.plist
-sudo rm /Library/LaunchDaemons/com.opendlna.server.plist
+sudo launchctl unload /Library/LaunchDaemons/com.vuio.server.plist
+sudo rm /Library/LaunchDaemons/com.vuio.server.plist
 
 # Remove application
-sudo rm -rf /Applications/OpenDLNA
+sudo rm -rf /Applications/VuIO
 
 # Remove user data (optional)
-rm -rf ~/Library/Application\ Support/OpenDLNA
-rm -rf ~/Library/Logs/opendlna*
+rm -rf ~/Library/Application\ Support/VuIO
+rm -rf ~/Library/Logs/vuio*
 ```
 
 ### Manual Installation
 
 ```bash
 # Stop any running instances
-pkill opendlna
+pkill vuio
 
 # Remove binary
-sudo rm /usr/local/bin/opendlna
+sudo rm /usr/local/bin/vuio
 
 # Remove launch agent
-launchctl unload ~/Library/LaunchAgents/com.opendlna.server.plist
-rm ~/Library/LaunchAgents/com.opendlna.server.plist
+launchctl unload ~/Library/LaunchAgents/com.vuio.server.plist
+rm ~/Library/LaunchAgents/com.vuio.server.plist
 
 # Remove user data
-rm -rf ~/Library/Application\ Support/OpenDLNA
+rm -rf ~/Library/Application\ Support/VuIO
 ```
 
 ## Getting Help
 
 If you continue to experience issues:
 
-1. **Check the logs** in `~/Library/Logs/` or `~/Library/Application Support/OpenDLNA/logs/`
+1. **Check the logs** in `~/Library/Logs/` or `~/Library/Application Support/VuIO/logs/`
 2. **Verify permissions** in System Preferences → Security & Privacy
 3. **Test network connectivity** with the diagnostic commands above
 4. **Search existing issues** on GitHub
 5. **Create a new issue** with:
    - macOS version (`sw_vers`)
-   - OpenDLNA version
+   - VuIO version
    - Configuration file (remove sensitive paths)
    - Relevant log entries
    - Network configuration (`ifconfig`)
@@ -668,7 +668,7 @@ If you continue to experience issues:
 ### Integration with macOS Features
 
 #### Spotlight Integration
-OpenDLNA can integrate with Spotlight for faster media discovery:
+VuIO can integrate with Spotlight for faster media discovery:
 
 ```toml
 [media]
@@ -676,9 +676,9 @@ use_spotlight_metadata = true  # Use Spotlight metadata when available
 ```
 
 #### Time Machine Exclusions
-Exclude OpenDLNA data from Time Machine backups:
+Exclude VuIO data from Time Machine backups:
 
 ```bash
-tmutil addexclusion ~/Library/Application\ Support/OpenDLNA/media.db
-tmutil addexclusion ~/Library/Logs/opendlna.log
+tmutil addexclusion ~/Library/Application\ Support/VuIO/media.db
+tmutil addexclusion ~/Library/Logs/vuio.log
 ```

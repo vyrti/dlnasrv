@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Master packaging script for OpenDLNA
+# Master packaging script for VuIO
 # Builds all supported package formats based on the current platform
 
 set -e
@@ -18,7 +18,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 function show_help() {
-    echo -e "${GREEN}--- OpenDLNA Master Packaging Script ---${NC}"
+    echo -e "${GREEN}--- VuIO Master Packaging Script ---${NC}"
     echo ""
     echo "Usage: $0 [VERSION] [OUTPUT_DIR] [BINARY_DIR]"
     echo ""
@@ -44,7 +44,7 @@ function show_help() {
 function list_binaries() {
     echo -e "${CYAN}Available binaries in $BINARY_DIR:${NC}"
     if [[ -d "$BINARY_DIR" ]]; then
-        find "$BINARY_DIR" -name "opendlna*" -type f -executable 2>/dev/null | sort || echo "No binaries found"
+        find "$BINARY_DIR" -name "vuio*" -type f -executable 2>/dev/null | sort || echo "No binaries found"
     else
         echo "Binary directory not found: $BINARY_DIR"
     fi
@@ -62,8 +62,8 @@ function detect_platform() {
 function build_windows_packages() {
     echo -e "${YELLOW}--- Building Windows Packages ---${NC}"
     
-    local msvc_binary="$BINARY_DIR/x86_64-pc-windows-msvc/release/opendlna.exe"
-    local gnu_binary="$BINARY_DIR/x86_64-pc-windows-gnu/release/opendlna.exe"
+    local msvc_binary="$BINARY_DIR/x86_64-pc-windows-msvc/release/vuio.exe"
+    local gnu_binary="$BINARY_DIR/x86_64-pc-windows-gnu/release/vuio.exe"
     
     if [[ -f "$msvc_binary" ]]; then
         echo "Building MSI installer (MSVC)..."
@@ -96,8 +96,8 @@ function build_windows_packages() {
 function build_macos_packages() {
     echo -e "${YELLOW}--- Building macOS Packages ---${NC}"
     
-    local x64_binary="$BINARY_DIR/x86_64-apple-darwin/release/opendlna"
-    local arm64_binary="$BINARY_DIR/aarch64-apple-darwin/release/opendlna"
+    local x64_binary="$BINARY_DIR/x86_64-apple-darwin/release/vuio"
+    local arm64_binary="$BINARY_DIR/aarch64-apple-darwin/release/vuio"
     
     if [[ -f "$x64_binary" ]]; then
         echo "Building PKG installer (x86_64)..."
@@ -123,9 +123,9 @@ function build_macos_packages() {
 function build_linux_packages() {
     echo -e "${YELLOW}--- Building Linux Packages ---${NC}"
     
-    local x64_binary="$BINARY_DIR/x86_64-unknown-linux-gnu/release/opendlna"
-    local arm64_binary="$BINARY_DIR/aarch64-unknown-linux-gnu/release/opendlna"
-    local musl_binary="$BINARY_DIR/x86_64-unknown-linux-musl/release/opendlna"
+    local x64_binary="$BINARY_DIR/x86_64-unknown-linux-gnu/release/vuio"
+    local arm64_binary="$BINARY_DIR/aarch64-unknown-linux-gnu/release/vuio"
+    local musl_binary="$BINARY_DIR/x86_64-unknown-linux-musl/release/vuio"
     
     cd linux
     
@@ -210,7 +210,7 @@ done
 # Change to packaging directory
 cd "$(dirname "$0")"
 
-echo -e "${GREEN}--- OpenDLNA Package Builder ---${NC}"
+echo -e "${GREEN}--- VuIO Package Builder ---${NC}"
 echo "Version: $VERSION"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Binary Directory: $BINARY_DIR"

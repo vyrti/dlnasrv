@@ -1,12 +1,12 @@
 use crate::platform::{
-    NetworkInterface, InterfaceType, PlatformError, PlatformResult,
-    network::{NetworkManager, SsdpSocket, SsdpConfig, NetworkDiagnostics, InterfaceStatus, FirewallStatus}
+    network::{NetworkDiagnostics, NetworkManager, SsdpConfig, SsdpSocket, InterfaceStatus, FirewallStatus},
+    InterfaceType, NetworkInterface, PlatformError, PlatformResult,
 };
 use async_trait::async_trait;
 use std::net::{IpAddr, SocketAddr};
 use std::process::Command;
 use tokio::net::UdpSocket;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 /// macOS-specific network manager implementation
 pub struct MacOSNetworkManager {
@@ -195,7 +195,8 @@ impl MacOSNetworkManager {
                 if let Some(name) = &current_interface {
                     if !name.starts_with("lo") && current_ip.is_some() { // Skip loopback
                         let interface_type = self.determine_macos_interface_type(name);
-                        let final_is_up = is_up && (status_active || name.starts_with("awdl") || name.starts_with("utun"));
+                        // FIX: Rely only on the <UP> flag. `status: active` is too strict.
+                        let final_is_up = is_up;
                         
                         interfaces.push(NetworkInterface {
                             name: name.clone(),
@@ -245,7 +246,8 @@ impl MacOSNetworkManager {
         if let Some(name) = current_interface {
             if !name.starts_with("lo") && current_ip.is_some() { // Skip loopback
                 let interface_type = self.determine_macos_interface_type(&name);
-                let final_is_up = is_up && (status_active || name.starts_with("awdl") || name.starts_with("utun"));
+                // FIX: Rely only on the <UP> flag. `status: active` is too strict.
+                let final_is_up = is_up;
                 
                 interfaces.push(NetworkInterface {
                     name,
@@ -264,9 +266,13 @@ impl MacOSNetworkManager {
     /// Determine interface type based on macOS interface name
     fn determine_macos_interface_type(&self, name: &str) -> InterfaceType {
         if name.starts_with("en") {
-            // en0 is typically the primary interface (WiFi or Ethernet)
-            // en1+ are usually bridge members or additional interfaces
-            InterfaceType::Ethernet
+            // Heuristic: en0 is often Wi-Fi on modern MacBooks.
+            // Ethernet adapters (USB-C, Thunderbolt) often get higher numbers.
+            if name == "en0" {
+                InterfaceType::WiFi
+            } else {
+                InterfaceType::Ethernet
+            }
         } else if name.starts_with("awdl") {
             // Apple Wireless Direct Link (AirDrop, etc.)
             InterfaceType::WiFi
@@ -301,7 +307,7 @@ impl MacOSNetworkManager {
             })
             .min_by_key(|iface| {
                 match (&iface.interface_type, iface.name.as_str()) {
-                    (InterfaceType::Ethernet, "en0") => 0, // Primary interface (usually WiFi on modern Macs)
+                    (InterfaceType::WiFi, "en0") => 0,     // Primary interface (often WiFi on modern Macs)
                     (InterfaceType::Ethernet, _) if iface.name.starts_with("en") => 1, // Other en interfaces
                     (InterfaceType::WiFi, "awdl0") => 2,   // Apple Wireless Direct Link
                     (InterfaceType::WiFi, _) => 3,         // Other WiFi
@@ -368,20 +374,21 @@ impl NetworkManager for MacOSNetworkManager {
     }
     
     async fn create_ssdp_socket_with_config(&self, config: &SsdpConfig) -> PlatformResult<SsdpSocket> {
-        let mut last_error = None;
-        
         // Try primary port first
         match self.try_bind_port_macos(config.primary_port).await {
             Ok(socket) => {
                 let interfaces = self.get_local_interfaces().await?;
-                let suitable_interfaces: Vec<_> = interfaces.into_iter()
+                let suitable_interfaces: Vec<_> = interfaces
+                    .into_iter()
                     .filter(|iface| !iface.is_loopback && iface.is_up && iface.supports_multicast)
                     .collect();
-                
+
                 if suitable_interfaces.is_empty() {
-                    return Err(PlatformError::NetworkConfig("No suitable network interfaces found on macOS".to_string()));
+                    return Err(PlatformError::NetworkConfig(
+                        "No suitable network interfaces found on macOS".to_string(),
+                    ));
                 }
-                
+
                 return Ok(SsdpSocket {
                     socket,
                     port: config.primary_port,
@@ -389,40 +396,41 @@ impl NetworkManager for MacOSNetworkManager {
                     multicast_enabled: false,
                 });
             }
-            Err(e) => {
-                warn!("Primary port {} failed on macOS: {}", config.primary_port, e);
-                last_error = Some(e);
+            Err(primary_error) => {
+                warn!(
+                    "Primary port {} failed on macOS: {}. Trying fallback ports.",
+                    config.primary_port, primary_error
+                );
+
+                // Try fallback ports
+                for &port in &config.fallback_ports {
+                    if let Ok(socket) = self.try_bind_port_macos(port).await {
+                        info!("Using fallback port {} on macOS", port);
+                        let interfaces = self.get_local_interfaces().await?;
+                        let suitable_interfaces: Vec<_> = interfaces
+                            .into_iter()
+                            .filter(|iface| !iface.is_loopback && iface.is_up && iface.supports_multicast)
+                            .collect();
+                        
+                        if suitable_interfaces.is_empty() {
+                             return Err(PlatformError::NetworkConfig(
+                                "No suitable network interfaces found on macOS".to_string(),
+                            ));
+                        }
+
+                        return Ok(SsdpSocket {
+                            socket,
+                            port,
+                            interfaces: suitable_interfaces,
+                            multicast_enabled: false,
+                        });
+                    }
+                }
+                
+                // If all fallbacks also fail, return the original error from the primary port
+                Err(primary_error)
             }
         }
-        
-        // Try fallback ports
-        for &port in &config.fallback_ports {
-            match self.try_bind_port_macos(port).await {
-                Ok(socket) => {
-                    info!("Using fallback port {} on macOS", port);
-                    let interfaces = self.get_local_interfaces().await?;
-                    let suitable_interfaces: Vec<_> = interfaces.into_iter()
-                        .filter(|iface| !iface.is_loopback && iface.is_up && iface.supports_multicast)
-                        .collect();
-                    
-                    return Ok(SsdpSocket {
-                        socket,
-                        port,
-                        interfaces: suitable_interfaces,
-                        multicast_enabled: false,
-                    });
-                }
-                Err(e) => {
-                    debug!("Fallback port {} failed on macOS: {}", port, e);
-                    last_error = Some(e);
-                }
-            }
-        }
-        
-        // If we get here, all ports failed
-        Err(last_error.unwrap_or_else(|| 
-            PlatformError::NetworkConfig("All ports failed on macOS".to_string())
-        ))
     }
     
     async fn get_local_interfaces(&self) -> PlatformResult<Vec<NetworkInterface>> {
@@ -640,12 +648,12 @@ mod tests {
         
         assert_eq!(
             manager.determine_macos_interface_type("en0"),
-            InterfaceType::Ethernet
+            InterfaceType::WiFi
         );
         
         assert_eq!(
             manager.determine_macos_interface_type("en1"),
-            InterfaceType::WiFi
+            InterfaceType::Ethernet
         );
         
         assert_eq!(
@@ -690,14 +698,14 @@ en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
         let en0 = &interfaces[0];
         assert_eq!(en0.name, "en0");
         assert_eq!(en0.ip_address, "192.168.1.100".parse::<IpAddr>().unwrap());
-        assert_eq!(en0.interface_type, InterfaceType::Ethernet);
+        assert_eq!(en0.interface_type, InterfaceType::WiFi);
         assert!(en0.is_up);
         assert!(en0.supports_multicast);
         
         let en1 = &interfaces[1];
         assert_eq!(en1.name, "en1");
         assert_eq!(en1.ip_address, "192.168.1.101".parse::<IpAddr>().unwrap());
-        assert_eq!(en1.interface_type, InterfaceType::WiFi);
+        assert_eq!(en1.interface_type, InterfaceType::Ethernet);
     }
     
     #[test]
@@ -711,7 +719,7 @@ en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
                 is_loopback: false,
                 is_up: true,
                 supports_multicast: true,
-                interface_type: InterfaceType::WiFi,
+                interface_type: InterfaceType::Ethernet,
             },
             NetworkInterface {
                 name: "en0".to_string(),
@@ -719,7 +727,7 @@ en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
                 is_loopback: false,
                 is_up: true,
                 supports_multicast: true,
-                interface_type: InterfaceType::Ethernet,
+                interface_type: InterfaceType::WiFi,
             },
             NetworkInterface {
                 name: "utun0".to_string(),
@@ -733,6 +741,6 @@ en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
         
         let preferred = manager.get_preferred_multicast_interface(&interfaces);
         assert!(preferred.is_some());
-        assert_eq!(preferred.unwrap().name, "en0"); // Should prefer en0 (primary Ethernet)
+        assert_eq!(preferred.unwrap().name, "en0"); // Should prefer en0 (WiFi on modern Macs)
     }
 }

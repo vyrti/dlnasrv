@@ -263,82 +263,38 @@ impl PlatformInfo {
         Ok(metadata)
     }
 
-    /// Get the best network interface for DLNA operations using a scoring system.
+    /// Get the best network interface for DLNA operations using a deterministic priority.
     pub fn get_primary_interface(&self) -> Option<&NetworkInterface> {
-        self.network_interfaces
-            .iter()
-            .filter(|iface| {
-                // Pre-filter for usable interfaces
-                !iface.is_loopback && iface.is_up && iface.supports_multicast
-            })
-            .max_by_key(|iface| {
-                let mut score = 0;
+        // A simple, deterministic approach to finding the best interface.
+        
+        // Priority 1: Find the first active, non-loopback Ethernet interface with a private IPv4 address.
+        if let Some(iface) = self.network_interfaces.iter().find(|i| {
+            i.is_up && !i.is_loopback && i.interface_type == InterfaceType::Ethernet &&
+            matches!(i.ip_address, IpAddr::V4(ip) if ip.is_private())
+        }) {
+            return Some(iface);
+        }
 
-                // Score based on IP address type
-                if let IpAddr::V4(ipv4) = iface.ip_address {
-                    if ipv4.is_private() {
-                        score += 100;
-                        // Bonus for the most common home network range
-                        if ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168 {
-                            score += 20;
-                        }
-                        // Slightly less bonus for 10.x.x.x range
-                        if ipv4.octets()[0] == 10 {
-                            score += 10;
-                        }
-                        // Penalize 172.16.0.0/12 range slightly as it's common for Docker/VMs
-                        if ipv4.octets()[0] == 172 && (ipv4.octets()[1] >= 16 && ipv4.octets()[1] <= 31) {
-                            score -= 30;
-                        }
-                    } else if ipv4.is_link_local() {
-                        // APIPA 169.254.x.x
-                        score -= 200;
-                    } else {
-                        // Public IPs are less likely to be for local DLNA
-                        score -= 50;
-                    }
-                } else {
-                    // Penalize IPv6 slightly for now as IPv4 is more common for DLNA
-                    score -= 10;
-                }
+        // Priority 2: Find the first active, non-loopback Wi-Fi interface with a private IPv4 address.
+        if let Some(iface) = self.network_interfaces.iter().find(|i| {
+            i.is_up && !i.is_loopback && i.interface_type == InterfaceType::WiFi &&
+            matches!(i.ip_address, IpAddr::V4(ip) if ip.is_private())
+        }) {
+            return Some(iface);
+        }
 
-                // Score based on interface type
-                match &iface.interface_type {
-                    InterfaceType::Ethernet => score += 50,
-                    InterfaceType::WiFi => score += 40,
-                    InterfaceType::VPN => score -= 100, // Usually not desired for local discovery
-                    _ => {}
-                }
-
-                // Penalize common virtual/undesirable adapter names
-                let name_lower = iface.name.to_lowercase();
-                let undesirable_keywords = [
-                    "virtual",
-                    "hyper-v",
-                    "vmware",
-                    "vbox",
-                    "vethernet",
-                    "default switch",
-                    "teredo",
-                    "isatap",
-                ];
-                if undesirable_keywords
-                    .iter()
-                    .any(|&keyword| name_lower.contains(keyword))
-                {
-                    score -= 150;
-                }
-
-                // Log score for debugging purposes
-                tracing::debug!(
-                    "Interface '{}' ({}) scored {}",
-                    iface.name,
-                    iface.ip_address,
-                    score
-                );
-
-                score
-            })
+        // Priority 3: Find any other active, non-loopback interface with a private IPv4 address.
+        if let Some(iface) = self.network_interfaces.iter().find(|i| {
+            i.is_up && !i.is_loopback &&
+            matches!(i.ip_address, IpAddr::V4(ip) if ip.is_private())
+        }) {
+            return Some(iface);
+        }
+        
+        // Priority 4: As a last resort, take the first active, non-loopback interface of any kind.
+        self.network_interfaces.iter().find(|i| {
+            i.is_up && !i.is_loopback
+        })
     }
 
     /// Check if the platform supports a specific feature
@@ -396,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn test_primary_interface_scoring() {
+    fn test_primary_interface_selection_logic() {
         let ethernet_iface = NetworkInterface {
             name: "Ethernet".to_string(),
             ip_address: "192.168.1.10".parse().unwrap(),
@@ -419,7 +375,7 @@ mod tests {
             is_loopback: false,
             is_up: true,
             supports_multicast: true,
-            interface_type: InterfaceType::Ethernet, // Hyper-V reports as Ethernet
+            interface_type: InterfaceType::Other("Virtual".to_string()),
         };
 
         let platform_info = PlatformInfo {
@@ -427,16 +383,17 @@ mod tests {
             version: "".to_string(),
             capabilities: PlatformCapabilities::for_current_platform(),
             network_interfaces: vec![
-                ethernet_iface.clone(),
+                // Order is intentionally mixed up to test priority
                 wifi_iface.clone(),
                 hyperv_iface.clone(),
+                ethernet_iface.clone(),
             ],
             metadata: HashMap::new(),
         };
 
         let primary = platform_info.get_primary_interface();
         assert!(primary.is_some());
-        // Ethernet with 192.168.x.x should be preferred
+        // Ethernet should be preferred over Wi-Fi and Other.
         assert_eq!(primary.unwrap().name, "Ethernet");
         assert_eq!(
             primary.unwrap().ip_address,

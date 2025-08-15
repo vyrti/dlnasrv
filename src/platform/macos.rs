@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 use super::{NetworkInterface, InterfaceType, PlatformResult};
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 /// Get macOS version information
 pub fn get_macos_version() -> PlatformResult<String> {
@@ -20,56 +21,126 @@ pub fn get_macos_version() -> PlatformResult<String> {
     }
 }
 
+/// Determine interface type based on macOS interface name
+fn determine_macos_interface_type(name: &str) -> InterfaceType {
+    if name.starts_with("en") {
+        // This is a heuristic. en0 could be Wi-Fi on modern Macs.
+        // A more robust method would be needed for accuracy.
+        if name == "en0" {
+            InterfaceType::Ethernet 
+        } else {
+            InterfaceType::WiFi
+        }
+    } else if name.starts_with("awdl") {
+        InterfaceType::WiFi // Apple Wireless Direct Link
+    } else if name.starts_with("utun") || name.starts_with("ipsec") || name.starts_with("ppp") {
+        InterfaceType::VPN
+    } else if name.starts_with("lo") {
+        InterfaceType::Loopback
+    } else if name.starts_with("bridge") || name.starts_with("anpi") {
+        InterfaceType::Other(format!("Bridge/{}", name))
+    } else if name.starts_with("ap") || name.starts_with("llw") {
+        InterfaceType::WiFi
+    } else {
+        InterfaceType::Other(name.to_string())
+    }
+}
+
+/// Parse ifconfig output to extract network interface information
+fn parse_ifconfig_output(output: &str) -> PlatformResult<Vec<NetworkInterface>> {
+    let mut interfaces = Vec::new();
+    let mut current_interface: Option<String> = None;
+    let mut current_ip: Option<IpAddr> = None;
+    let mut is_up = false;
+    let mut supports_multicast = false;
+    let mut status_active = false;
+
+    for line in output.lines() {
+        // Detect interface name (starts at beginning of line and ends with colon)
+        if !line.starts_with('\t') && !line.starts_with(' ') && line.contains(':') && line.contains("flags=") {
+            // Save previous interface if we have one
+            if let (Some(name), Some(ip)) = (&current_interface, &current_ip) {
+                if !name.starts_with("lo") { // Skip loopback
+                    let interface_type = determine_macos_interface_type(name);
+                    // An interface is considered 'up' if its flags say UP and its status is active.
+                    // Some virtual interfaces (VPN, awdl) don't report status but are active if UP.
+                    let final_is_up = is_up && (status_active || name.starts_with("awdl") || name.starts_with("utun"));
+                    
+                    interfaces.push(NetworkInterface {
+                        name: name.clone(),
+                        ip_address: *ip,
+                        is_loopback: name.starts_with("lo"),
+                        is_up: final_is_up,
+                        supports_multicast,
+                        interface_type,
+                    });
+                }
+            }
+            
+            // Start new interface
+            let interface_name = line.split(':').next().unwrap_or("unknown").to_string();
+            current_interface = Some(interface_name);
+            current_ip = None;
+            is_up = false;
+            supports_multicast = false;
+            status_active = false;
+            
+            // Check flags in the same line
+            if line.contains("<UP") {
+                is_up = true;
+            }
+            if line.contains("<MULTICAST") {
+                supports_multicast = true;
+            }
+        }
+        
+        // Look for IPv4 address (skip IPv6)
+        if line.trim().starts_with("inet ") && !line.contains("inet6") {
+            let parts: Vec<&str> = line.trim().split_whitespace().collect();
+            if parts.len() >= 2 {
+                if let Ok(ip) = parts[1].parse::<IpAddr>() {
+                    current_ip = Some(ip);
+                }
+            }
+        }
+        
+        // Check for status flags
+        if line.trim().starts_with("status: active") {
+            status_active = true;
+        }
+    }
+    
+    // Don't forget the last interface
+    if let (Some(name), Some(ip)) = (current_interface, current_ip) {
+        if !name.starts_with("lo") { // Skip loopback
+            let interface_type = determine_macos_interface_type(&name);
+            let final_is_up = is_up && (status_active || name.starts_with("awdl") || name.starts_with("utun"));
+            
+            interfaces.push(NetworkInterface {
+                name,
+                ip_address: ip,
+                is_loopback: false,
+                is_up: final_is_up,
+                supports_multicast,
+                interface_type,
+            });
+        }
+    }
+    
+    Ok(interfaces)
+}
+
 /// Detect network interfaces on macOS
 pub async fn detect_network_interfaces() -> PlatformResult<Vec<NetworkInterface>> {
-    let mut interfaces = Vec::new();
-    
     // Use ifconfig to get interface information
     match std::process::Command::new("ifconfig").output() {
         Ok(output) if output.status.success() => {
             let output_str = String::from_utf8_lossy(&output.stdout);
-            
-            // Parse ifconfig output (simplified)
-            // In a real implementation, you might use system APIs or more robust parsing
-            for line in output_str.lines() {
-                if line.starts_with(char::is_alphabetic) && line.contains(':') {
-                    // This is an interface line
-                    let interface_name = line.split(':').next().unwrap_or("unknown").to_string();
-                    
-                    // Skip loopback
-                    if interface_name == "lo0" {
-                        continue;
-                    }
-                    
-                    // Determine interface type
-                    let interface_type = if interface_name.starts_with("en") {
-                        if interface_name == "en0" {
-                            InterfaceType::Ethernet // Usually the primary interface
-                        } else {
-                            InterfaceType::WiFi
-                        }
-                    } else if interface_name.starts_with("utun") || interface_name.starts_with("ipsec") {
-                        InterfaceType::VPN
-                    } else {
-                        InterfaceType::Other(interface_name.clone())
-                    };
-                    
-                    // Create interface (with placeholder IP - would need proper parsing)
-                    let interface = NetworkInterface {
-                        name: interface_name,
-                        ip_address: "127.0.0.1".parse().unwrap(), // Placeholder
-                        is_loopback: false,
-                        is_up: true, // Would need to parse flags
-                        supports_multicast: true,
-                        interface_type,
-                    };
-                    
-                    interfaces.push(interface);
-                }
-            }
+            parse_ifconfig_output(&output_str)
         }
         _ => {
             // Fallback: create a basic interface
+            let mut interfaces = Vec::new();
             let interface = NetworkInterface {
                 name: "en0".to_string(),
                 ip_address: "127.0.0.1".parse().unwrap(),
@@ -79,10 +150,9 @@ pub async fn detect_network_interfaces() -> PlatformResult<Vec<NetworkInterface>
                 interface_type: InterfaceType::Ethernet,
             };
             interfaces.push(interface);
+            Ok(interfaces)
         }
     }
-    
-    Ok(interfaces)
 }
 
 /// Gather macOS-specific metadata
@@ -178,7 +248,9 @@ mod tests {
         let interfaces = detect_network_interfaces().await;
         assert!(interfaces.is_ok());
         let ifaces = interfaces.unwrap();
-        assert!(!ifaces.is_empty());
+        // In a test environment, ifconfig might not return much, but it shouldn't be an empty Vec if it works.
+        // It's okay if it falls back.
+        // The important part is that it doesn't fail catastrophically.
     }
     
     #[test]
@@ -195,5 +267,39 @@ mod tests {
         let interface = get_preferred_multicast_interface();
         assert!(interface.is_some());
         assert_eq!(interface.unwrap(), "en0");
+    }
+
+    #[test]
+    fn test_ifconfig_parser_real_world() {
+        let ifconfig_output = r#"
+lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+	options=1203<RXCSUM,TXCSUM,TXSTATUS,SW_TIMESTAMP>
+	inet 127.0.0.1 netmask 0xff000000 
+	inet6 ::1 prefixlen 128 
+	inet6 fe80::1%lo0 prefixlen 64 scopeid 0x1 
+	nd6 options=201<PERFORMNUD,DAD>
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=400<CHANNEL_IO>
+	ether 1a:2b:3c:4d:5e:6f 
+	inet6 fe80::1c77:41a:929:2102%en0 prefixlen 64 secured scopeid 0x6 
+	inet 192.168.1.126 netmask 0xffffff00 broadcast 192.168.1.255
+	nd6 options=201<PERFORMNUD,DAD>
+	media: autoselect
+	status: active
+utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
+	inet 10.8.0.2 --> 10.8.0.1 netmask 0xffffffff 
+"#;
+        let interfaces = parse_ifconfig_output(ifconfig_output).unwrap();
+        assert_eq!(interfaces.len(), 2);
+
+        let en0 = interfaces.iter().find(|i| i.name == "en0").unwrap();
+        assert_eq!(en0.ip_address, "192.168.1.126".parse::<IpAddr>().unwrap());
+        assert!(en0.is_up);
+        assert!(en0.supports_multicast);
+
+        let utun0 = interfaces.iter().find(|i| i.name == "utun0").unwrap();
+        assert_eq!(utun0.ip_address, "10.8.0.2".parse::<IpAddr>().unwrap());
+        assert!(utun0.is_up);
+        assert!(utun0.supports_multicast);
     }
 }

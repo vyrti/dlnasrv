@@ -413,24 +413,22 @@ async fn create_ssdp_response(state: &AppState, _ssdp_port: u16, service_type: &
 }
 
 async fn get_server_ip(state: &AppState) -> String {
-    // 1. Use the primary interface detected at startup.
+    // 1. Use the primary interface detected at startup. This is the main path.
     if let Some(iface) = state.platform_info.get_primary_interface() {
         return iface.ip_address.to_string();
     }
 
-    // 2. Fallback to the configured server interface if it's not a wildcard.
+    // 2. If the primary selection logic fails, log a clear warning and try the configured interface.
+    warn!("Primary interface selection failed. This might happen if no suitable network connection (Ethernet/WiFi with a private IP) was found.");
     if state.config.server.interface != "0.0.0.0" && !state.config.server.interface.is_empty() {
+        warn!("Falling back to configured server interface: {}", state.config.server.interface);
         return state.config.server.interface.clone();
     }
     
-    // 3. Last resort: re-detect and find a suitable one.
-    warn!("Primary interface not found in AppState, re-detecting...");
-    let network_manager = PlatformNetworkManager::new();
-    if let Ok(iface) = network_manager.get_primary_interface().await {
-        return iface.ip_address.to_string();
-    }
-
-    // 4. Final fallback.
-    warn!("Could not determine a specific server IP; falling back to 127.0.0.1. DLNA clients may not be able to connect.");
+    // 3. As a last resort, log a critical error and use localhost.
+    // NO re-detection.
+    error!("FATAL: Could not determine a usable server IP address from startup information.");
+    error!("Please check your network connection and ensure you have a valid private IP (e.g., 192.168.x.x).");
+    error!("Falling back to 127.0.0.1 - DLNA clients will NOT be able to connect.");
     "127.0.0.1".to_string()
 }
